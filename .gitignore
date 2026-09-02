@@ -1,0 +1,34 @@
+# Secrets — never commit API keys
+.env
+.env.local
+.env.*.local
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# Pipeline working dirs (keep the folders via .gitkeep)
+recordings/*
+!recordings/.gitkeep
+output/*
+!output/.gitkeep
+processed/*
+!processed/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# OS / editor
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+
+# Local agent / IDE config
+.claude/
+.cursor/

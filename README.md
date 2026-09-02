@@ -12,8 +12,10 @@ One macOS CLI for two lives:
 Same engine either way — only the recap style changes:
 
 ```
-recording  →  ffmpeg (mp3)  →  whisperkit-cli (on-device transcript)  →  Claude  →  output/*_notes.docx
+recording  →  ffmpeg (mp3)  →  whisperkit-cli (on-device transcript)  →  your LLM  →  output/*_notes.docx
 ```
+
+Bring **your own API key** from Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together, xAI, local Ollama, or any OpenAI-compatible endpoint.
 
 The command is `./catchup`.
 
@@ -22,7 +24,7 @@ The command is `./catchup`.
 ## Send this to someone
 
 1. Share the GitHub repo. **Do not send your `.env`** — that file has your API key.
-2. They need a Mac, [Homebrew](https://brew.sh), and an [Anthropic API key](https://console.anthropic.com/settings/keys).
+2. They need a Mac, [Homebrew](https://brew.sh), and an API key from **any** supported company (`./catchup providers`).
 3. `./catchup doctor` tells them if anything is missing.
 
 ---
@@ -48,11 +50,13 @@ brew install whisperkit-cli
 | **ffmpeg** | Converts `.mov` / `.mp4` / `.m4a` / … into an `.mp3` WhisperKit can read |
 | **whisperkit-cli** | On-device transcription with timestamps (audio never leaves your Mac) |
 
-Then pick a default style (you can always override per file):
+Then pick a company for the notes step, and a recap style:
 
 ```bash
-./catchup mode meeting    # work
-./catchup mode lecture    # school
+./catchup providers
+./catchup config openai          # or anthropic, gemini, groq, openrouter, …
+./catchup mode meeting           # work
+./catchup mode lecture           # school
 ./catchup doctor
 ```
 
@@ -66,7 +70,10 @@ Run `./catchup` with no arguments anytime to reprint this list.
 |---|---|
 | `./catchup setup` | Install ffmpeg, whisperkit-cli, Python, `.env` |
 | `./catchup doctor` | Check ffmpeg, whisperkit-cli, API key, folders |
-| `./catchup config` | Paste / update the Anthropic API key |
+| `./catchup config` | Pick a company and paste its API key |
+| `./catchup config openai` | Same, skipping the menu (any id from `providers`) |
+| `./catchup providers` | List Anthropic, OpenAI, Gemini, Groq, OpenRouter, … |
+| `./catchup model MODEL` | Override the default model for that company |
 | `./catchup mode meeting\|lecture` | Set the default recap style |
 | `./catchup meeting FILE` | Recap a **work** recording |
 | `./catchup lecture FILE` | Recap a **class** recording |
@@ -149,7 +156,7 @@ Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 |---|---|
 | `ffmpeg not found` | `brew install ffmpeg` then `./catchup doctor` |
 | `whisperkit-cli not found` | `brew install whisperkit-cli` then `./catchup doctor` |
-| `ANTHROPIC_API_KEY not set` | `./catchup config` |
+| `ANTHROPIC_API_KEY not set` / no API key | `./catchup config` then pick a company |
 | Notes feel like a meeting but it was class | `./catchup lecture FILE` (or `./catchup mode lecture`) |
 | Notes feel like a lecture but it was work | `./catchup meeting FILE` |
 | File sits in `recordings/` | Size must be stable (still copying). Then `./catchup status` |
@@ -161,5 +168,35 @@ Full traceback lives in `logs/pipeline.log`.
 ## Privacy
 
 - Audio stays on your Mac for transcription (**whisperkit-cli**).
-- The **text transcript** is sent to Anthropic (Claude) to write the notes.
+- The **text transcript** is sent to whichever LLM you configured (Anthropic, OpenAI, Gemini, …) to write the notes.
 - `.env` is gitignored. Don’t zip it, don’t Slack it, don’t commit it.
+
+---
+
+## LLM providers
+
+```bash
+./catchup providers
+./catchup config gemini
+./catchup model gemini-2.5-flash
+```
+
+| id | Company |
+|---|---|
+| `anthropic` | Anthropic Claude |
+| `openai` | OpenAI GPT |
+| `gemini` | Google Gemini |
+| `groq` | Groq |
+| `openrouter` | OpenRouter (one key, many models) |
+| `deepseek` | DeepSeek |
+| `mistral` | Mistral |
+| `together` | Together AI |
+| `xai` | xAI Grok |
+| `ollama` | Ollama on your machine (no cloud key) |
+| `custom` | Any OpenAI-compatible base URL |
+
+`custom` example:
+
+```bash
+./catchup config custom https://your-gateway.example/v1
+```

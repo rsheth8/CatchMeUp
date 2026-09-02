@@ -41,7 +41,7 @@ usage() {
   cat <<EOF
 ${BOLD}CatchMeUp${RESET}  ${DIM}missed the Zoom. missed lecture. still got the notes.${RESET}
 
-  ${DIM}recording → ffmpeg → whisperkit-cli → Claude → output/*_notes.docx${RESET}
+  ${DIM}recording → ffmpeg → whisperkit-cli → your LLM → output/*_notes.docx${RESET}
 
   ${BOLD}Work${RESET}      decisions, owners, action items
   ${BOLD}School${RESET}    concepts, terms, study / exam checklist
@@ -49,7 +49,10 @@ ${BOLD}CatchMeUp${RESET}  ${DIM}missed the Zoom. missed lecture. still got the n
 ${BOLD}Setup${RESET}
   ./catchup setup              First-time install (ffmpeg + whisperkit-cli + Python + .env)
   ./catchup doctor             Check that everything is ready
-  ./catchup config             Save your Anthropic API key
+  ./catchup providers          List companies whose API keys we accept
+  ./catchup config             Pick a company and paste its API key
+  ./catchup config openai      Same, skipping the menu (any provider id)
+  ./catchup model MODEL        Override the default model for that company
   ./catchup mode meeting|lecture   Default recap style (when you don't pass one)
 
 ${BOLD}Use${RESET}
@@ -72,7 +75,7 @@ ${BOLD}Examples${RESET}
   ./catchup lecture ~/Downloads/cs61a-week3.mp4
   ./catchup drop ~/Downloads/zoom-call.m4a && ./catchup watch meeting
 
-Requires macOS, Homebrew, ${BOLD}ffmpeg${RESET}, ${BOLD}whisperkit-cli${RESET}, and an Anthropic API key.
+Requires macOS, Homebrew, ${BOLD}ffmpeg${RESET}, ${BOLD}whisperkit-cli${RESET}, and an API key from Anthropic, OpenAI, Gemini, Groq, OpenRouter, …
 EOF
 }
 
@@ -114,15 +117,51 @@ default_mode() {
 
 write_env() {
   load_env
-  local key="${1:-${ANTHROPIC_API_KEY:-sk-ant-your-key-here}}"
+  local key="${1:-${CATCHMEUP_API_KEY:-${ANTHROPIC_API_KEY:-}}}"
   local mode="${2:-${CATCHMEUP_MODE:-meeting}}"
+  local provider="${3:-${CATCHMEUP_PROVIDER:-anthropic}}"
+  local model="${4:-${CATCHMEUP_MODEL:-}}"
+  local base="${5:-${CATCHMEUP_BASE_URL:-}}"
   mode="$(normalize_mode "$mode")"
   [[ -z "$mode" ]] && mode="meeting"
-  cat > "$ENV_FILE" <<EOF
-ANTHROPIC_API_KEY=$key
-CATCHMEUP_MODE=$mode
-EOF
+  [[ -z "$provider" ]] && provider="anthropic"
+  {
+    printf 'CATCHMEUP_PROVIDER=%s\n' "$provider"
+    printf 'CATCHMEUP_API_KEY=%s\n' "$key"
+    printf 'CATCHMEUP_MODEL=%s\n' "$model"
+    printf 'CATCHMEUP_BASE_URL=%s\n' "$base"
+    printf 'CATCHMEUP_MODE=%s\n' "$mode"
+    case "$provider" in
+      anthropic) printf 'ANTHROPIC_API_KEY=%s\n' "$key" ;;
+      openai)    printf 'OPENAI_API_KEY=%s\n' "$key" ;;
+      gemini)    printf 'GEMINI_API_KEY=%s\n' "$key" ;;
+      groq)      printf 'GROQ_API_KEY=%s\n' "$key" ;;
+      openrouter) printf 'OPENROUTER_API_KEY=%s\n' "$key" ;;
+      deepseek)  printf 'DEEPSEEK_API_KEY=%s\n' "$key" ;;
+      mistral)   printf 'MISTRAL_API_KEY=%s\n' "$key" ;;
+      together)  printf 'TOGETHER_API_KEY=%s\n' "$key" ;;
+      xai)       printf 'XAI_API_KEY=%s\n' "$key" ;;
+    esac
+  } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
+}
+
+known_provider() {
+  [[ -n "$(normalize_provider "${1:-}")" ]]
+}
+
+normalize_provider() {
+  local raw
+  raw="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  case "$raw" in
+    claude) echo anthropic ;;
+    gpt|chatgpt) echo openai ;;
+    google|google-ai) echo gemini ;;
+    grok) echo xai ;;
+    local) echo ollama ;;
+    anthropic|openai|gemini|groq|openrouter|deepseek|mistral|together|xai|ollama|custom) echo "$raw" ;;
+    *) echo "" ;;
+  esac
 }
 
 media_in() {
@@ -178,7 +217,7 @@ cmd_setup() {
   info "Installing Python packages"
   "$PYTHON" -m pip install --upgrade pip >/dev/null
   "$PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt"
-  ok "Python venv + anthropic + python-docx"
+  ok "Python venv + anthropic + openai + python-docx"
 
   ensure_dirs
   ok "Folders: recordings/  output/  processed/  logs/"
@@ -186,8 +225,8 @@ cmd_setup() {
   if [[ ! -f "$ENV_FILE" ]]; then
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     echo
-    warn "No .env yet — you need an Anthropic API key for the notes/analysis step."
-    echo "    Get one at https://console.anthropic.com/settings/keys"
+    warn "No .env yet — paste an API key from any supported company."
+    echo "    List them: ./catchup providers"
     cmd_config
   else
     ok ".env already present"
@@ -205,17 +244,92 @@ cmd_setup() {
   fi
 }
 
+cmd_providers() {
+  header "API keys we accept"
+  if python_ok; then
+    "$PYTHON" "$PROJECT_DIR/providers.py" --list
+  else
+    cat <<'EOF'
+anthropic     Anthropic (Claude)
+openai        OpenAI (GPT)
+gemini        Google (Gemini)
+groq          Groq
+openrouter    OpenRouter (one key, many models)
+deepseek      DeepSeek
+mistral       Mistral
+together      Together AI
+xai           xAI (Grok)
+ollama        Ollama (local, no cloud key)
+custom        Custom OpenAI-compatible API
+EOF
+  fi
+}
+
+provider_signup() {
+  case "$1" in
+    anthropic) echo "https://console.anthropic.com/settings/keys" ;;
+    openai) echo "https://platform.openai.com/api-keys" ;;
+    gemini) echo "https://aistudio.google.com/apikey" ;;
+    groq) echo "https://console.groq.com/keys" ;;
+    openrouter) echo "https://openrouter.ai/keys" ;;
+    deepseek) echo "https://platform.deepseek.com/api_keys" ;;
+    mistral) echo "https://console.mistral.ai/api-keys" ;;
+    together) echo "https://api.together.ai/settings/api-keys" ;;
+    xai) echo "https://console.x.ai/" ;;
+    ollama) echo "https://ollama.com" ;;
+    custom) echo "(your company's OpenAI-compatible endpoint)" ;;
+  esac
+}
+
 cmd_config() {
-  header "Anthropic API key"
-  echo "Get a key at ${CYAN}https://console.anthropic.com/settings/keys${RESET}"
-  echo
-  local key=""
-  if [[ -n "${1:-}" && "$1" == sk-ant-* ]]; then
-    key="$1"
+  header "Bring your own API key"
+  load_env
+  local provider="" key="" model="" base=""
+  if [[ -n "${1:-}" ]] && known_provider "$1"; then
+    provider="$(normalize_provider "$1")"
+    shift || true
+  elif [[ -n "${1:-}" && "$1" == sk-ant-* ]]; then
+    provider="anthropic"
+  fi
+
+  if [[ -z "$provider" ]]; then
+    cmd_providers
+    echo
+    printf "Company id (openai, anthropic, gemini, …): "
+    read -r provider
+    provider="$(normalize_provider "$provider")"
+  fi
+  if [[ -z "$provider" ]]; then
+    err "Unknown company. Run ./catchup providers"
+    exit 1
+  fi
+
+  local signup
+  signup="$(provider_signup "$provider")"
+  info "Using ${BOLD}$provider${RESET}"
+  [[ -n "$signup" ]] && echo "    Get a key: ${CYAN}${signup}${RESET}"
+
+  if [[ "$provider" == "custom" ]]; then
+    if [[ -n "${1:-}" && "$1" == http* ]]; then
+      base="$1"
+      shift || true
+    else
+      printf "Base URL (https://…/v1): "
+      read -r base
+    fi
+    if [[ -z "$base" ]]; then
+      err "custom provider needs CATCHMEUP_BASE_URL"
+      exit 1
+    fi
+  fi
+
+  if [[ "$provider" == "ollama" ]]; then
+    key="ollama"
+    ok "Ollama does not need a cloud key (talks to http://127.0.0.1:11434)"
   elif [[ -n "${1:-}" ]]; then
     key="$1"
   else
-    printf "Paste key (sk-ant-...): "
+    printf "Paste API key: "
     read -r key
   fi
   if [[ -z "$key" ]]; then
@@ -223,11 +337,29 @@ cmd_config() {
     echo "    You can also edit .env by hand. See .env.example."
     exit 1
   fi
-  if [[ ! "$key" =~ ^sk-ant- ]]; then
-    warn "That doesn't look like an Anthropic key (usually starts with sk-ant-)."
+
+  if [[ -t 0 ]]; then
+    printf "Model [blank = provider default]: "
+    read -r model || true
   fi
-  write_env "$key" "$(default_mode)"
-  ok "Saved to .env (this file is gitignored — do not send it to anyone)"
+
+  write_env "$key" "$(default_mode)" "$provider" "$model" "$base"
+  ok "Saved $provider to .env (gitignored — do not send this file)"
+  echo "    Recap with: ./catchup meeting FILE   or   ./catchup lecture FILE"
+}
+
+cmd_model() {
+  local model="${1:-}"
+  if [[ -z "$model" ]]; then
+    err "Usage: ./catchup model <model-id>"
+    echo "    Example: ./catchup model gpt-4.1-mini"
+    echo "    Example: ./catchup model claude-sonnet-4-5"
+    exit 1
+  fi
+  load_env
+  write_env "${CATCHMEUP_API_KEY:-${ANTHROPIC_API_KEY:-}}" "$(default_mode)" \
+    "${CATCHMEUP_PROVIDER:-anthropic}" "$model" "${CATCHMEUP_BASE_URL:-}"
+  ok "Model override is now ${BOLD}$model${RESET}"
 }
 
 cmd_mode() {
@@ -240,7 +372,8 @@ cmd_mode() {
     exit 1
   fi
   load_env
-  write_env "${ANTHROPIC_API_KEY:-sk-ant-your-key-here}" "$mode"
+  write_env "${CATCHMEUP_API_KEY:-${ANTHROPIC_API_KEY:-}}" "$mode" \
+    "${CATCHMEUP_PROVIDER:-anthropic}" "${CATCHMEUP_MODEL:-}" "${CATCHMEUP_BASE_URL:-}"
   ok "Default recap style is now ${BOLD}$mode${RESET}"
   echo "    Override any time: ./catchup meeting FILE   or   ./catchup lecture FILE"
 }
@@ -288,8 +421,8 @@ cmd_doctor() {
 
   if python_ok; then
     ok "venv       $PYTHON"
-    if "$PYTHON" -c "import anthropic, docx" 2>/dev/null; then
-      ok "Python packages (anthropic, python-docx)"
+    if "$PYTHON" -c "import anthropic, openai, docx" 2>/dev/null; then
+      ok "Python packages (anthropic, openai, python-docx)"
     else
       err "Python packages missing — run ./catchup setup"
       failed=1
@@ -300,11 +433,21 @@ cmd_doctor() {
   fi
 
   load_env
-  if [[ -n "${ANTHROPIC_API_KEY:-}" && "$ANTHROPIC_API_KEY" != "sk-ant-your-key-here" ]]; then
-    ok "ANTHROPIC_API_KEY is set"
+  local provider
+  provider="$(normalize_provider "${CATCHMEUP_PROVIDER:-anthropic}")"
+  [[ -z "$provider" ]] && provider="anthropic"
+  local key="${CATCHMEUP_API_KEY:-${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${GEMINI_API_KEY:-${GROQ_API_KEY:-}}}}}"
+  if [[ "$provider" == "ollama" ]]; then
+    ok "Provider   ollama (local)"
+  elif [[ -n "$key" && "$key" != "sk-ant-your-key-here" && "$key" != "your-key-here" ]]; then
+    ok "Provider   $provider  (API key is set)"
   else
-    err "ANTHROPIC_API_KEY not set — run ./catchup config"
+    err "No API key — run ./catchup config $provider"
+    echo "    See companies: ./catchup providers"
     failed=1
+  fi
+  if [[ -n "${CATCHMEUP_MODEL:-}" ]]; then
+    info "Model      $CATCHMEUP_MODEL"
   fi
 
   info "Default mode: $(default_mode)  (change with ./catchup mode lecture|meeting)"
@@ -573,6 +716,8 @@ main() {
     setup) cmd_setup "$@" ;;
     doctor) cmd_doctor "$@" ;;
     config) cmd_config "$@" ;;
+    providers|provider) cmd_providers "$@" ;;
+    model) cmd_model "$@" ;;
     mode) cmd_mode "$@" ;;
     meeting|work|zoom) cmd_recap meeting "$@" ;;
     lecture|class|lesson) cmd_recap lecture "$@" ;;

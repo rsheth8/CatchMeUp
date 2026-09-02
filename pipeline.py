@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CatchMeUp — recording -> mp3 -> WhisperKit transcript -> Claude recap -> .docx
+CatchMeUp — recording -> mp3 -> WhisperKit transcript -> LLM recap -> .docx
 
 Modes:
   meeting  — standup / Zoom / client call (decisions, action items)
@@ -15,19 +15,18 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 OUTPUT_DIR = PROJECT_DIR / "output"
 PROCESSED_DIR = PROJECT_DIR / "processed"
 LOGS_DIR = PROJECT_DIR / "logs"
 ENV_FILE = PROJECT_DIR / ".env"
 
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-MAX_RETRIES = 5
 MODES = ("meeting", "lecture")
 
 LECTURE_NAME_HINTS = (
@@ -208,8 +207,8 @@ def guess_mode(path: Path) -> str:
     return "meeting"
 
 
-def call_claude(transcript_text: str, mode: str) -> dict:
-    import anthropic
+def call_llm(transcript_text: str, mode: str) -> dict:
+    from providers import complete_json
 
     if mode == "lecture":
         role = (
@@ -225,37 +224,8 @@ def call_claude(transcript_text: str, mode: str) -> dict:
         )
         schema = MEETING_SCHEMA
 
-    client = anthropic.Anthropic()
     prompt = f"{role}\n\n{schema}\n\nTranscript (timestamped):\n{transcript_text}"
-
-    delay = 5
-    last_err = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=8000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = resp.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`")
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw
-            return json.loads(raw)
-        except anthropic.RateLimitError as e:
-            last_err = e
-            log(f"Rate limited (attempt {attempt}/{MAX_RETRIES}), backing off {delay}s")
-            time.sleep(delay)
-            delay = min(delay * 2, 60)
-        except anthropic.APIStatusError as e:
-            last_err = e
-            if e.status_code >= 500:
-                log(f"Claude API {e.status_code} (attempt {attempt}/{MAX_RETRIES}), retrying in {delay}s")
-                time.sleep(delay)
-                delay = min(delay * 2, 60)
-            else:
-                raise
-    raise RuntimeError(f"Claude API call failed after {MAX_RETRIES} attempts: {last_err}")
+    return complete_json(prompt, log=log)
 
 
 def _bullets(doc, items):
@@ -354,13 +324,16 @@ def main(argv=None):
         log(f"ERROR: source file not found: {source}")
         sys.exit(1)
 
+    from providers import active_provider, resolve_api_key
+
     mode = args.mode or guess_mode(source)
     if mode not in MODES:
         mode = "meeting"
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        log("ERROR: ANTHROPIC_API_KEY not set — run ./catchup config")
-        notify("CatchMeUp", "Missing ANTHROPIC_API_KEY - see logs/pipeline.log")
+    provider = active_provider()
+    if not resolve_api_key(provider) and provider != "ollama":
+        log(f"ERROR: no API key for {provider} — run ./catchup config {provider}")
+        notify("CatchMeUp", "Missing API key - run ./catchup config")
         sys.exit(1)
 
     try:
@@ -369,8 +342,8 @@ def main(argv=None):
         whisper_json = transcribe(mp3_path)
         transcript_text = transcript_with_timestamps(whisper_json)
 
-        log(f"Calling Claude for {mode} recap...")
-        analysis = call_claude(transcript_text, mode)
+        log(f"Calling {provider} for {mode} recap...")
+        analysis = call_llm(transcript_text, mode)
 
         recorded_at = datetime.fromtimestamp(source.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         docx_path = build_docx(analysis, source.name, recorded_at, mode)

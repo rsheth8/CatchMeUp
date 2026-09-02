@@ -1,5 +1,5 @@
-# Required Homebrew packages for this project.
-# Installed automatically by `./skip setup`, or by hand:
+# Required Homebrew packages for CatchMeUp.
+# Installed automatically by `./catchup setup`, or by hand:
 #   brew install ffmpeg
 #   brew install whisperkit-cli
 #   brew bundle

@@ -1,0 +1,597 @@
+#!/usr/bin/env bash
+# catchup — CatchMeUp CLI: meeting + lecture recordings → Word notes
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR"
+
+PYTHON="$PROJECT_DIR/venv/bin/python3"
+RECORDINGS_DIR="$PROJECT_DIR/recordings"
+OUTPUT_DIR="$PROJECT_DIR/output"
+PROCESSED_DIR="$PROJECT_DIR/processed"
+LOGS_DIR="$PROJECT_DIR/logs"
+ENV_FILE="$PROJECT_DIR/.env"
+LOCK_DIR="$LOGS_DIR/watch.lock.d"
+WATCH_LABEL="com.rsheth8.catchmeup.watch"
+WATCH_PLIST="$HOME/Library/LaunchAgents/${WATCH_LABEL}.plist"
+
+if [[ -t 1 ]]; then
+  BOLD=$'\033[1m'
+  DIM=$'\033[2m'
+  GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'
+  RED=$'\033[31m'
+  CYAN=$'\033[36m'
+  RESET=$'\033[0m'
+else
+  BOLD="" DIM="" GREEN="" YELLOW="" RED="" CYAN="" RESET=""
+fi
+
+ok()   { echo "${GREEN}✓${RESET} $*"; }
+warn() { echo "${YELLOW}!${RESET} $*"; }
+err()  { echo "${RED}✗${RESET} $*" >&2; }
+info() { echo "${CYAN}→${RESET} $*"; }
+header() {
+  echo
+  echo "${BOLD}$*${RESET}"
+  echo "${DIM}$(printf '─%.0s' {1..46})${RESET}"
+}
+
+usage() {
+  cat <<EOF
+${BOLD}CatchMeUp${RESET}  ${DIM}missed the Zoom. missed lecture. still got the notes.${RESET}
+
+  ${DIM}recording → ffmpeg → whisperkit-cli → Claude → output/*_notes.docx${RESET}
+
+  ${BOLD}Work${RESET}      decisions, owners, action items
+  ${BOLD}School${RESET}    concepts, terms, study / exam checklist
+
+${BOLD}Setup${RESET}
+  ./catchup setup              First-time install (ffmpeg + whisperkit-cli + Python + .env)
+  ./catchup doctor             Check that everything is ready
+  ./catchup config             Save your Anthropic API key
+  ./catchup mode meeting|lecture   Default recap style (when you don't pass one)
+
+${BOLD}Use${RESET}
+  ./catchup meeting FILE       Recap a work meeting / Zoom / standup
+  ./catchup lecture FILE       Recap a class / seminar / recorded lecture
+  ./catchup drop FILE          Copy a recording into recordings/
+  ./catchup watch meeting      Watch recordings/ as work meetings
+  ./catchup watch lecture      Watch recordings/ as lectures
+  ./catchup status             Pending files, latest notes, watcher state
+  ./catchup list               List generated Word notes
+  ./catchup logs               Show recent log  (./catchup logs -f to follow)
+  ./catchup open               Open the output folder in Finder
+
+${BOLD}Background watcher (macOS)${RESET}
+  ./catchup install-watch meeting|lecture
+  ./catchup uninstall-watch
+
+${BOLD}Examples${RESET}
+  ./catchup meeting ~/Desktop/standup.mov
+  ./catchup lecture ~/Downloads/cs61a-week3.mp4
+  ./catchup drop ~/Downloads/zoom-call.m4a && ./catchup watch meeting
+
+Requires macOS, Homebrew, ${BOLD}ffmpeg${RESET}, ${BOLD}whisperkit-cli${RESET}, and an Anthropic API key.
+EOF
+}
+
+ensure_dirs() {
+  mkdir -p "$RECORDINGS_DIR" "$OUTPUT_DIR" "$PROCESSED_DIR" "$LOGS_DIR"
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+load_env() {
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
+}
+
+python_ok() {
+  [[ -x "$PYTHON" ]]
+}
+
+normalize_mode() {
+  local raw="${1:-}"
+  case "$raw" in
+    meeting|work|zoom|job|office) echo meeting ;;
+    lecture|class|lesson|school|uni|college) echo lecture ;;
+    "") echo "" ;;
+    *) echo "" ;;
+  esac
+}
+
+default_mode() {
+  load_env
+  local m
+  m="$(normalize_mode "${CATCHMEUP_MODE:-}")"
+  echo "${m:-meeting}"
+}
+
+write_env() {
+  load_env
+  local key="${1:-${ANTHROPIC_API_KEY:-sk-ant-your-key-here}}"
+  local mode="${2:-${CATCHMEUP_MODE:-meeting}}"
+  mode="$(normalize_mode "$mode")"
+  [[ -z "$mode" ]] && mode="meeting"
+  cat > "$ENV_FILE" <<EOF
+ANTHROPIC_API_KEY=$key
+CATCHMEUP_MODE=$mode
+EOF
+  chmod 600 "$ENV_FILE"
+}
+
+media_in() {
+  local dir="$1"
+  local f
+  shopt -s nullglob
+  for f in "$dir"/*.mov "$dir"/*.mp4 "$dir"/*.m4a "$dir"/*.mp3 "$dir"/*.wav "$dir"/*.aac "$dir"/*.mkv "$dir"/*.webm; do
+    printf '%s\n' "$f"
+  done
+  shopt -u nullglob
+}
+
+cmd_setup() {
+  header "Setup"
+
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    err "This project is set up for macOS (WhisperKit + Homebrew)."
+    exit 1
+  fi
+
+  if ! have brew; then
+    err "Homebrew is not installed."
+    echo "    Install it from https://brew.sh then run ./catchup setup again."
+    exit 1
+  fi
+  ok "Homebrew"
+
+  info "Installing the two audio packages this project needs:"
+  echo "    ${BOLD}brew install ffmpeg${RESET}          # convert recordings to mp3"
+  echo "    ${BOLD}brew install whisperkit-cli${RESET}  # transcribe on-device (Apple Silicon)"
+  if have ffmpeg; then
+    ok "ffmpeg already installed"
+  else
+    brew install ffmpeg
+  fi
+  if have whisperkit-cli; then
+    ok "whisperkit-cli already installed"
+  else
+    brew install whisperkit-cli
+  fi
+  ok "ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')"
+  ok "whisperkit-cli ($(command -v whisperkit-cli))"
+
+  if ! have python3; then
+    err "python3 not found. Install it with: brew install python"
+    exit 1
+  fi
+
+  if [[ ! -x "$PYTHON" ]]; then
+    info "Creating Python virtualenv at venv/"
+    python3 -m venv "$PROJECT_DIR/venv"
+  fi
+  info "Installing Python packages"
+  "$PYTHON" -m pip install --upgrade pip >/dev/null
+  "$PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt"
+  ok "Python venv + anthropic + python-docx"
+
+  ensure_dirs
+  ok "Folders: recordings/  output/  processed/  logs/"
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
+    echo
+    warn "No .env yet — you need an Anthropic API key for the notes/analysis step."
+    echo "    Get one at https://console.anthropic.com/settings/keys"
+    cmd_config
+  else
+    ok ".env already present"
+  fi
+
+  echo
+  if cmd_doctor; then
+    echo
+    echo "${GREEN}${BOLD}You're set.${RESET} Work or school:"
+    echo "  ./catchup meeting /path/to/standup.mov"
+    echo "  ./catchup lecture /path/to/cs-week3.mp4"
+  else
+    echo
+    warn "Setup finished, but doctor still has items to fix (see above)."
+  fi
+}
+
+cmd_config() {
+  header "Anthropic API key"
+  echo "Get a key at ${CYAN}https://console.anthropic.com/settings/keys${RESET}"
+  echo
+  local key=""
+  if [[ -n "${1:-}" && "$1" == sk-ant-* ]]; then
+    key="$1"
+  elif [[ -n "${1:-}" ]]; then
+    key="$1"
+  else
+    printf "Paste key (sk-ant-...): "
+    read -r key
+  fi
+  if [[ -z "$key" ]]; then
+    err "No key entered."
+    echo "    You can also edit .env by hand. See .env.example."
+    exit 1
+  fi
+  if [[ ! "$key" =~ ^sk-ant- ]]; then
+    warn "That doesn't look like an Anthropic key (usually starts with sk-ant-)."
+  fi
+  write_env "$key" "$(default_mode)"
+  ok "Saved to .env (this file is gitignored — do not send it to anyone)"
+}
+
+cmd_mode() {
+  local mode
+  mode="$(normalize_mode "${1:-}")"
+  if [[ -z "$mode" ]]; then
+    err "Usage: ./catchup mode meeting|lecture"
+    echo "    meeting  = work Zoom / standup / 1:1"
+    echo "    lecture  = class / seminar / recorded lecture"
+    exit 1
+  fi
+  load_env
+  write_env "${ANTHROPIC_API_KEY:-sk-ant-your-key-here}" "$mode"
+  ok "Default recap style is now ${BOLD}$mode${RESET}"
+  echo "    Override any time: ./catchup meeting FILE   or   ./catchup lecture FILE"
+}
+
+cmd_doctor() {
+  header "Doctor"
+  local failed=0
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    ok "macOS"
+  else
+    warn "Not macOS — WhisperKit and notifications may not work"
+    failed=1
+  fi
+
+  if have brew; then
+    ok "Homebrew  $(brew --prefix)"
+  else
+    err "Homebrew missing — https://brew.sh"
+    failed=1
+  fi
+
+  if have ffmpeg; then
+    ok "ffmpeg     $(command -v ffmpeg)"
+  else
+    err "ffmpeg missing"
+    echo "    ${BOLD}brew install ffmpeg${RESET}"
+    failed=1
+  fi
+
+  if have whisperkit-cli; then
+    ok "whisperkit-cli  $(command -v whisperkit-cli)"
+  else
+    err "whisperkit-cli missing"
+    echo "    ${BOLD}brew install whisperkit-cli${RESET}"
+    failed=1
+  fi
+
+  if have python3; then
+    ok "python3    $(python3 --version 2>&1)"
+  else
+    err "python3 missing — brew install python"
+    failed=1
+  fi
+
+  if python_ok; then
+    ok "venv       $PYTHON"
+    if "$PYTHON" -c "import anthropic, docx" 2>/dev/null; then
+      ok "Python packages (anthropic, python-docx)"
+    else
+      err "Python packages missing — run ./catchup setup"
+      failed=1
+    fi
+  else
+    err "venv missing — run ./catchup setup"
+    failed=1
+  fi
+
+  load_env
+  if [[ -n "${ANTHROPIC_API_KEY:-}" && "$ANTHROPIC_API_KEY" != "sk-ant-your-key-here" ]]; then
+    ok "ANTHROPIC_API_KEY is set"
+  else
+    err "ANTHROPIC_API_KEY not set — run ./catchup config"
+    failed=1
+  fi
+
+  info "Default mode: $(default_mode)  (change with ./catchup mode lecture|meeting)"
+
+  ensure_dirs
+  ok "Folders exist"
+
+  if launchctl list "$WATCH_LABEL" >/dev/null 2>&1; then
+    ok "Background watcher is loaded ($WATCH_LABEL)"
+  else
+    info "Background watcher not installed (optional: ./catchup install-watch meeting|lecture)"
+  fi
+
+  echo
+  if [[ "$failed" -eq 0 ]]; then
+    echo "${GREEN}${BOLD}All good.${RESET}"
+    return 0
+  else
+    echo "${RED}${BOLD}Fix the items above, then run ./catchup doctor again.${RESET}"
+    return 1
+  fi
+}
+
+cmd_recap() {
+  local mode="" file=""
+  while [[ $# -gt 0 ]]; do
+    local maybe
+    maybe="$(normalize_mode "$1")"
+    if [[ -n "$maybe" && -z "$file" ]]; then
+      mode="$maybe"
+      shift
+      continue
+    fi
+    file="$1"
+    shift
+  done
+  if [[ -z "$file" ]]; then
+    err "Usage: ./catchup meeting <file>   or   ./catchup lecture <file>"
+    exit 1
+  fi
+  if [[ ! -f "$file" ]]; then
+    err "File not found: $file"
+    exit 1
+  fi
+  if ! python_ok; then
+    err "Run ./catchup setup first."
+    exit 1
+  fi
+  [[ -z "$mode" ]] && mode=""
+  load_env
+  ensure_dirs
+  if [[ -n "$mode" ]]; then
+    header "CatchMeUp · ${mode}"
+    info "$(basename "$file")"
+    "$PYTHON" "$PROJECT_DIR/pipeline.py" --mode "$mode" "$file"
+  else
+    header "CatchMeUp"
+    info "$(basename "$file")  (mode guessed from name / default)"
+    "$PYTHON" "$PROJECT_DIR/pipeline.py" "$file"
+  fi
+  echo
+  ok "Notes are in ${BOLD}output/${RESET}"
+  ls -1t "$OUTPUT_DIR"/*.docx 2>/dev/null | head -3 || true
+}
+
+cmd_drop() {
+  local file="${1:-}"
+  if [[ -z "$file" ]]; then
+    err "Usage: ./catchup drop <recording-file>"
+    exit 1
+  fi
+  if [[ ! -f "$file" ]]; then
+    err "File not found: $file"
+    exit 1
+  fi
+  ensure_dirs
+  local dest="$RECORDINGS_DIR/$(basename "$file")"
+  if [[ "$(cd "$(dirname "$file")" && pwd)/$(basename "$file")" == "$dest" ]]; then
+    ok "Already in recordings/: $(basename "$file")"
+    return 0
+  fi
+  cp "$file" "$dest"
+  ok "Copied to recordings/$(basename "$file")"
+  echo "    Work:    ./catchup meeting \"$dest\""
+  echo "    School:  ./catchup lecture \"$dest\""
+  echo "    Watch:   ./catchup watch meeting   or   ./catchup watch lecture"
+}
+
+cmd_watch() {
+  local mode
+  mode="$(normalize_mode "${1:-}")"
+  [[ -z "$mode" ]] && mode="$(default_mode)"
+  if ! python_ok; then
+    err "Run ./catchup setup first."
+    exit 1
+  fi
+  ensure_dirs
+  header "Watching ${RECORDINGS_DIR}  (${mode})"
+  echo "Drop .mov .mp4 .m4a .mp3 .wav files into recordings/ — Ctrl-C to stop."
+  echo
+  local interval=8
+  while true; do
+    "$PROJECT_DIR/watch_and_process.sh" "$mode" || true
+    sleep "$interval"
+  done
+}
+
+cmd_status() {
+  ensure_dirs
+  header "Status"
+  info "Default mode: $(default_mode)"
+
+  local pending
+  pending="$(media_in "$RECORDINGS_DIR")"
+  if [[ -z "$pending" ]]; then
+    ok "recordings/ is empty (nothing waiting)"
+  else
+    warn "Waiting in recordings/:"
+    echo "$pending" | while IFS= read -r f; do
+      echo "    $(basename "$f")"
+    done
+  fi
+
+  echo
+  local notes
+  notes="$(ls -1t "$OUTPUT_DIR"/*.docx 2>/dev/null || true)"
+  if [[ -z "$notes" ]]; then
+    info "No notes in output/ yet"
+  else
+    ok "Latest notes:"
+    echo "$notes" | head -5 | while IFS= read -r f; do
+      echo "    $(basename "$f")"
+    done
+  fi
+
+  echo
+  if launchctl list "$WATCH_LABEL" >/dev/null 2>&1; then
+    ok "Background watcher is running"
+  else
+    info "Background watcher is off"
+  fi
+
+  if [[ -d "$LOCK_DIR" ]]; then
+    warn "A run is in progress (lock present)"
+  fi
+
+  if [[ -f "$LOGS_DIR/pipeline.log" ]]; then
+    echo
+    echo "${DIM}Last log lines:${RESET}"
+    tail -n 8 "$LOGS_DIR/pipeline.log" | sed 's/^/    /'
+  fi
+}
+
+cmd_list() {
+  ensure_dirs
+  header "Notes in output/"
+  local f found=0
+  shopt -s nullglob
+  for f in "$OUTPUT_DIR"/*.docx; do
+    found=1
+    ls -lh "$f" | awk '{print "  " $5 "\t" $9}'
+  done
+  shopt -u nullglob
+  if [[ "$found" -eq 0 ]]; then
+    info "Nothing yet. Run: ./catchup meeting <file>  or  ./catchup lecture <file>"
+  fi
+}
+
+cmd_logs() {
+  ensure_dirs
+  local log="$LOGS_DIR/pipeline.log"
+  if [[ ! -f "$log" ]]; then
+    info "No log yet. It appears after the first recap."
+    return 0
+  fi
+  if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then
+    tail -n 50 -f "$log"
+  else
+    tail -n 80 "$log"
+  fi
+}
+
+cmd_open() {
+  ensure_dirs
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    open "$OUTPUT_DIR"
+    ok "Opened output/"
+  else
+    info "Notes live in $OUTPUT_DIR"
+  fi
+}
+
+write_plist() {
+  local mode="$1"
+  cat > "$WATCH_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${WATCH_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${PROJECT_DIR}/watch_and_process.sh</string>
+    <string>${mode}</string>
+  </array>
+  <key>WatchPaths</key>
+  <array>
+    <string>${RECORDINGS_DIR}</string>
+  </array>
+  <key>StandardOutPath</key>
+  <string>${LOGS_DIR}/watch.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>${LOGS_DIR}/watch.err.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+EOF
+}
+
+cmd_install_watch() {
+  local mode
+  mode="$(normalize_mode "${1:-}")"
+  [[ -z "$mode" ]] && mode="$(default_mode)"
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    err "install-watch only works on macOS."
+    exit 1
+  fi
+  if ! python_ok; then
+    err "Run ./catchup setup first."
+    exit 1
+  fi
+  ensure_dirs
+  chmod +x "$PROJECT_DIR/watch_and_process.sh"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  write_plist "$mode"
+  launchctl unload "$WATCH_PLIST" 2>/dev/null || true
+  launchctl load "$WATCH_PLIST"
+  ok "Watcher installed in ${BOLD}$mode${RESET} mode. Drop files into recordings/"
+  echo "    Plist: $WATCH_PLIST"
+  echo "    Switch: ./catchup install-watch lecture   or   meeting"
+  echo "    Remove: ./catchup uninstall-watch"
+}
+
+cmd_uninstall_watch() {
+  if [[ -f "$WATCH_PLIST" ]]; then
+    launchctl unload "$WATCH_PLIST" 2>/dev/null || true
+    rm -f "$WATCH_PLIST"
+    ok "Background watcher removed"
+  else
+    info "Watcher was not installed"
+  fi
+}
+
+main() {
+  local cmd="${1:-help}"
+  # Shortcut: ./catchup recording.mov  (uses default / guessed mode)
+  if [[ -n "$cmd" && -f "$cmd" ]]; then
+    cmd_recap "$@"
+    return
+  fi
+  shift || true
+  case "$cmd" in
+    help|-h|--help) usage ;;
+    setup) cmd_setup "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    config) cmd_config "$@" ;;
+    mode) cmd_mode "$@" ;;
+    meeting|work|zoom) cmd_recap meeting "$@" ;;
+    lecture|class|lesson) cmd_recap lecture "$@" ;;
+    recap|transcribe|run|process) cmd_recap "$@" ;;
+    drop|add) cmd_drop "$@" ;;
+    watch) cmd_watch "$@" ;;
+    status) cmd_status "$@" ;;
+    list) cmd_list "$@" ;;
+    logs|log) cmd_logs "$@" ;;
+    open) cmd_open "$@" ;;
+    install-watch) cmd_install_watch "$@" ;;
+    uninstall-watch) cmd_uninstall_watch "$@" ;;
+    *)
+      err "Unknown command: $cmd"
+      echo
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

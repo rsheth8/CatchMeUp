@@ -1,3 +1,3 @@
 #!/bin/bash
-# Legacy helper. Prefer: ./skip recap <file>
-exec "$(cd "$(dirname "$0")" && pwd)/skip" recap "$@"
+# Prefer: ./catchup meeting FILE   or   ./catchup lecture FILE
+exec "$(cd "$(dirname "$0")" && pwd)/catchup" recap "$@"

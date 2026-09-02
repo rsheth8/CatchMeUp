@@ -1,39 +1,42 @@
-# SkipTheMeet
+# CatchMeUp
 
-**Missed the Zoom. Still got the notes.**
+**Missed the Zoom. Missed lecture. Still got the notes.**
 
-macOS CLI that turns a meeting recording into a Word doc — TL;DR, timestamped bookmarks, detailed notes, follow-ups.
+One macOS CLI for two lives:
 
-Drop in a Zoom, Google Meet, or screen recording. SkipTheMeet does the rest:
+| You | Drop in | You get |
+|---|---|---|
+| **Full-time / intern** | Zoom, Meet, standup, 1:1, client call | TL;DR, decisions, **action items**, timestamped bookmarks |
+| **Student** | Recorded lecture, seminar, discussion section | What you missed, **terms**, lecture notes, **study / exam checklist** |
+
+Same engine either way — only the recap style changes:
 
 ```
 recording  →  ffmpeg (mp3)  →  whisperkit-cli (on-device transcript)  →  Claude  →  output/*_notes.docx
 ```
 
-Searchable as: **meeting notes**, **meeting recap**, **transcript to Word**, **WhisperKit**, **ffmpeg**, **macOS CLI**.
-
-The command is `./skip`.
+The command is `./catchup`.
 
 ---
 
 ## Send this to someone
 
-1. Share https://github.com/rsheth8/SkipTheMeet — **do not send your `.env`** (that’s your API key).
+1. Share the GitHub repo. **Do not send your `.env`** — that file has your API key.
 2. They need a Mac, [Homebrew](https://brew.sh), and an [Anthropic API key](https://console.anthropic.com/settings/keys).
-3. `./skip doctor` tells them if anything is missing.
+3. `./catchup doctor` tells them if anything is missing.
 
 ---
 
 ## Install (about 5 minutes)
 
 ```bash
-git clone https://github.com/rsheth8/SkipTheMeet.git
-cd SkipTheMeet
-chmod +x skip watch_and_process.sh pipeline.py
-./skip setup
+git clone https://github.com/rsheth8/CatchMeUp.git
+cd CatchMeUp
+chmod +x catchup watch_and_process.sh pipeline.py
+./catchup setup
 ```
 
-`./skip setup` installs the two packages this project cannot run without (same as `brew bundle`):
+`./catchup setup` installs the two packages this cannot run without:
 
 ```bash
 brew install ffmpeg
@@ -45,74 +48,95 @@ brew install whisperkit-cli
 | **ffmpeg** | Converts `.mov` / `.mp4` / `.m4a` / … into an `.mp3` WhisperKit can read |
 | **whisperkit-cli** | On-device transcription with timestamps (audio never leaves your Mac) |
 
-It also creates a Python virtualenv, installs `anthropic` + `python-docx`, and asks for your Anthropic API key (saved in `.env`, gitignored).
+Then pick a default style (you can always override per file):
 
 ```bash
-./skip doctor
+./catchup mode meeting    # work
+./catchup mode lecture    # school
+./catchup doctor
 ```
-
-You want green checkmarks for **ffmpeg**, **whisperkit-cli**, the venv, and `ANTHROPIC_API_KEY`.
 
 ---
 
 ## Commands
 
-Run `./skip` with no arguments anytime to reprint this list.
+Run `./catchup` with no arguments anytime to reprint this list.
 
 | Command | What it does |
 |---|---|
-| `./skip setup` | First-time install: ffmpeg, whisperkit-cli, Python, `.env` |
-| `./skip doctor` | Check ffmpeg, whisperkit-cli, API key, folders |
-| `./skip config` | Paste / update the Anthropic API key |
-| `./skip recap FILE` | Process **one** recording now |
-| `./skip FILE` | Same as `recap` (shortcut) |
-| `./skip drop FILE` | Copy a file into `recordings/` |
-| `./skip watch` | Watch `recordings/` and recap new files (Ctrl-C to stop) |
-| `./skip status` | What’s waiting, latest notes, watcher on/off |
-| `./skip list` | List Word docs in `output/` |
-| `./skip logs` | Pipeline log (`./skip logs -f` to follow) |
-| `./skip open` | Open `output/` in Finder |
-| `./skip install-watch` | Background watcher via macOS launchd |
-| `./skip uninstall-watch` | Remove the background watcher |
+| `./catchup setup` | Install ffmpeg, whisperkit-cli, Python, `.env` |
+| `./catchup doctor` | Check ffmpeg, whisperkit-cli, API key, folders |
+| `./catchup config` | Paste / update the Anthropic API key |
+| `./catchup mode meeting\|lecture` | Set the default recap style |
+| `./catchup meeting FILE` | Recap a **work** recording |
+| `./catchup lecture FILE` | Recap a **class** recording |
+| `./catchup drop FILE` | Copy a file into `recordings/` |
+| `./catchup watch meeting` | Auto-recap new files as meetings |
+| `./catchup watch lecture` | Auto-recap new files as lectures |
+| `./catchup status` / `list` / `logs` / `open` | What’s waiting, notes, log, Finder |
+| `./catchup install-watch meeting\|lecture` | Background watcher (launchd) |
 
 ---
 
 ## Typical workflows
 
-**One file, right now**
+**Work — one call, right now**
 
 ```bash
-./skip recap ~/Desktop/standup.mov
-./skip open          # notes are in output/
+./catchup meeting ~/Desktop/standup.mov
+./catchup open
 ```
 
-**Drop-box (leave it running)**
+**School — one lecture, right now**
 
 ```bash
-./skip watch
-# in another window, or from Finder:
-./skip drop ~/Downloads/zoom-call.m4a
+./catchup lecture ~/Downloads/cs61a-week3.mp4
+./catchup open
 ```
 
-**Hands-off after login (optional)**
+**Drop-box for the week** (leave it running)
 
 ```bash
-./skip install-watch
-# anything you put in recordings/ is recapped automatically
+./catchup watch lecture          # midterms week
+./catchup drop ~/Downloads/week4-os.m4a
 ```
 
-When a run finishes you get a macOS notification, a Word file in `output/`, and the original media archived under `processed/`.
+```bash
+./catchup watch meeting          # a sprint of standups
+./catchup drop ~/Downloads/zoom-sync.m4a
+```
+
+If the filename already says `lecture`, `class`, `week`, `zoom`, `standup`, `1-1`, … CatchMeUp can guess. Passing `meeting` or `lecture` always wins.
+
+---
+
+## What the Word doc looks like
+
+**Meeting recap** (`*_meeting_notes.docx`)
+
+- TL;DR
+- Action items & follow-ups (owners / deadlines when they were said)
+- Timestamped bookmarks
+- Detailed notes
+
+**Lecture recap** (`*_lecture_notes.docx`)
+
+- What you missed
+- Key moments (definitions, worked examples, “this will be on the exam”)
+- Lecture notes by topic
+- Terms & definitions
+- Study / exam checklist
 
 ---
 
 ## Folders
 
 ```
-recordings/   drop files here (or pass a path to recap)
-output/       finished *_notes.docx files
+recordings/   drop files here
+output/       finished Word notes
 processed/    originals + mp3 + transcript json, archived per run
 logs/         pipeline.log
-.env          your API key (never commit this)
+.env          your API key + default mode (never commit this)
 ```
 
 Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
@@ -123,12 +147,12 @@ Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 
 | Symptom | Fix |
 |---|---|
-| `ffmpeg not found` | `brew install ffmpeg` then `./skip doctor` |
-| `whisperkit-cli not found` | `brew install whisperkit-cli` then `./skip doctor` |
-| `ANTHROPIC_API_KEY not set` | `./skip config` |
-| `venv missing` | `./skip setup` |
-| Claude rate-limit in the log | It retries on its own; wait and check `./skip logs` |
-| File sits in `recordings/` forever | Size must be stable (still copying). Then `./skip status` |
+| `ffmpeg not found` | `brew install ffmpeg` then `./catchup doctor` |
+| `whisperkit-cli not found` | `brew install whisperkit-cli` then `./catchup doctor` |
+| `ANTHROPIC_API_KEY not set` | `./catchup config` |
+| Notes feel like a meeting but it was class | `./catchup lecture FILE` (or `./catchup mode lecture`) |
+| Notes feel like a lecture but it was work | `./catchup meeting FILE` |
+| File sits in `recordings/` | Size must be stable (still copying). Then `./catchup status` |
 
 Full traceback lives in `logs/pipeline.log`.
 

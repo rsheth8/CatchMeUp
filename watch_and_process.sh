@@ -1,6 +1,6 @@
 #!/bin/bash
 # Finds fully-written recordings in recordings/ and runs them through pipeline.py.
-# Used by `./meet watch` and by the optional launchd watcher.
+# Used by `./skip watch` and by the optional launchd watcher.
 set -u
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +17,7 @@ fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
 if [[ ! -x "$PYTHON" ]]; then
-    echo "venv missing — run ./meet setup" >> "$PROJECT_DIR/logs/pipeline.log"
+    echo "venv missing — run ./skip setup" >> "$PROJECT_DIR/logs/pipeline.log"
     exit 1
 fi
 

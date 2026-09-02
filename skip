@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# meet — terminal frontend for the meeting transcribe pipeline
+# skip — SkipTheMeet CLI — terminal frontend for the meeting transcribe pipeline
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ PROCESSED_DIR="$PROJECT_DIR/processed"
 LOGS_DIR="$PROJECT_DIR/logs"
 ENV_FILE="$PROJECT_DIR/.env"
 LOCK_DIR="$LOGS_DIR/watch.lock.d"
-WATCH_LABEL="com.rsheth8.transcribe.watch"
+WATCH_LABEL="com.rsheth8.skipthemeet.watch"
 WATCH_PLIST="$HOME/Library/LaunchAgents/${WATCH_LABEL}.plist"
 
 if [[ -t 1 ]]; then
@@ -39,33 +39,33 @@ header() {
 
 usage() {
   cat <<EOF
-${BOLD}meet${RESET} — turn a meeting recording into a Word notes doc
+${BOLD}SkipTheMeet${RESET}  ${DIM}missed the Zoom. still got the notes.${RESET}
 
-  ${DIM}video/audio → mp3 (ffmpeg) → transcript (whisperkit-cli)${RESET}
-  ${DIM}→ Claude analysis → output/<name>_notes.docx${RESET}
+  ${DIM}recording → ffmpeg → whisperkit-cli → Claude → output/*_notes.docx${RESET}
 
 ${BOLD}Setup${RESET}
-  ./meet setup              First-time install (Homebrew packages + Python + .env)
-  ./meet doctor             Check that ffmpeg, whisperkit-cli, and the rest are ready
-  ./meet config             Save your Anthropic API key into .env
+  ./skip setup              First-time install (ffmpeg + whisperkit-cli + Python + .env)
+  ./skip doctor             Check that everything is ready
+  ./skip config             Save your Anthropic API key into .env
 
 ${BOLD}Use${RESET}
-  ./meet transcribe FILE    Process one recording right now
-  ./meet drop FILE          Copy a recording into recordings/ (drop-box)
-  ./meet watch              Watch recordings/ and process new files as they appear
-  ./meet status             Pending files, latest notes, watcher state
-  ./meet list               List generated Word notes
-  ./meet logs               Show recent pipeline log  (./meet logs -f to follow)
-  ./meet open               Open the output folder in Finder
+  ./skip recap FILE         Process one recording right now
+  ./skip FILE               Same thing (shortcut)
+  ./skip drop FILE          Copy a recording into recordings/
+  ./skip watch              Watch recordings/ and recap new files as they appear
+  ./skip status             Pending files, latest notes, watcher state
+  ./skip list               List generated Word notes
+  ./skip logs               Show recent log  (./skip logs -f to follow)
+  ./skip open               Open the output folder in Finder
 
 ${BOLD}Background watcher (macOS)${RESET}
-  ./meet install-watch      Auto-process anything dropped into recordings/
-  ./meet uninstall-watch    Stop the background watcher
+  ./skip install-watch      Auto-recap anything dropped into recordings/
+  ./skip uninstall-watch    Stop the background watcher
 
 ${BOLD}Examples${RESET}
-  ./meet setup
-  ./meet transcribe ~/Desktop/standup.mov
-  ./meet drop ~/Downloads/zoom-call.m4a && ./meet watch
+  ./skip setup
+  ./skip recap ~/Desktop/standup.mov
+  ./skip drop ~/Downloads/zoom-call.m4a && ./skip watch
 
 Requires macOS, Homebrew, ${BOLD}ffmpeg${RESET}, ${BOLD}whisperkit-cli${RESET}, and an Anthropic API key.
 EOF
@@ -110,7 +110,7 @@ cmd_setup() {
 
   if ! have brew; then
     err "Homebrew is not installed."
-    echo "    Install it from https://brew.sh then run ./meet setup again."
+    echo "    Install it from https://brew.sh then run ./skip setup again."
     exit 1
   fi
   ok "Homebrew"
@@ -162,8 +162,8 @@ cmd_setup() {
   if cmd_doctor; then
     echo
     echo "${GREEN}${BOLD}You're set.${RESET} Try:"
-    echo "  ./meet transcribe /path/to/recording.mov"
-    echo "  ./meet drop /path/to/recording.m4a && ./meet watch"
+    echo "  ./skip recap /path/to/recording.mov"
+    echo "  ./skip drop /path/to/recording.m4a && ./skip watch"
   else
     echo
     warn "Setup finished, but doctor still has items to fix (see above)."
@@ -240,11 +240,11 @@ cmd_doctor() {
     if "$PYTHON" -c "import anthropic, docx" 2>/dev/null; then
       ok "Python packages (anthropic, python-docx)"
     else
-      err "Python packages missing — run ./meet setup"
+      err "Python packages missing — run ./skip setup"
       failed=1
     fi
   else
-    err "venv missing — run ./meet setup"
+    err "venv missing — run ./skip setup"
     failed=1
   fi
 
@@ -252,7 +252,7 @@ cmd_doctor() {
   if [[ -n "${ANTHROPIC_API_KEY:-}" && "$ANTHROPIC_API_KEY" != "sk-ant-your-key-here" ]]; then
     ok "ANTHROPIC_API_KEY is set"
   else
-    err "ANTHROPIC_API_KEY not set — run ./meet config"
+    err "ANTHROPIC_API_KEY not set — run ./skip config"
     failed=1
   fi
 
@@ -262,7 +262,7 @@ cmd_doctor() {
   if launchctl list "$WATCH_LABEL" >/dev/null 2>&1; then
     ok "Background watcher is loaded ($WATCH_LABEL)"
   else
-    info "Background watcher not installed (optional: ./meet install-watch)"
+    info "Background watcher not installed (optional: ./skip install-watch)"
   fi
 
   echo
@@ -270,7 +270,7 @@ cmd_doctor() {
     echo "${GREEN}${BOLD}All good.${RESET}"
     return 0
   else
-    echo "${RED}${BOLD}Fix the items above, then run ./meet doctor again.${RESET}"
+    echo "${RED}${BOLD}Fix the items above, then run ./skip doctor again.${RESET}"
     return 1
   fi
 }
@@ -278,7 +278,7 @@ cmd_doctor() {
 cmd_transcribe() {
   local file="${1:-}"
   if [[ -z "$file" ]]; then
-    err "Usage: ./meet transcribe <recording-file>"
+    err "Usage: ./skip recap <recording-file>"
     exit 1
   fi
   if [[ ! -f "$file" ]]; then
@@ -286,12 +286,12 @@ cmd_transcribe() {
     exit 1
   fi
   if ! python_ok; then
-    err "Run ./meet setup first."
+    err "Run ./skip setup first."
     exit 1
   fi
   load_env
   ensure_dirs
-  header "Transcribe"
+  header "SkipTheMeet recap"
   info "$(basename "$file")"
   "$PYTHON" "$PROJECT_DIR/pipeline.py" "$file"
   echo
@@ -302,7 +302,7 @@ cmd_transcribe() {
 cmd_drop() {
   local file="${1:-}"
   if [[ -z "$file" ]]; then
-    err "Usage: ./meet drop <recording-file>"
+    err "Usage: ./skip drop <recording-file>"
     exit 1
   fi
   if [[ ! -f "$file" ]]; then
@@ -317,13 +317,13 @@ cmd_drop() {
   fi
   cp "$file" "$dest"
   ok "Copied to recordings/$(basename "$file")"
-  echo "    Process now:   ./meet transcribe \"$dest\""
-  echo "    Or watch:      ./meet watch"
+  echo "    Recap now:     ./skip recap \"$dest\""
+  echo "    Or watch:      ./skip watch"
 }
 
 cmd_watch() {
   if ! python_ok; then
-    err "Run ./meet setup first."
+    err "Run ./skip setup first."
     exit 1
   fi
   ensure_dirs
@@ -393,7 +393,7 @@ cmd_list() {
   done
   shopt -u nullglob
   if [[ "$found" -eq 0 ]]; then
-    info "Nothing yet. Run: ./meet transcribe <file>"
+    info "Nothing yet. Run: ./skip recap <file>"
   fi
 }
 
@@ -454,7 +454,7 @@ cmd_install_watch() {
     exit 1
   fi
   if ! python_ok; then
-    err "Run ./meet setup first."
+    err "Run ./skip setup first."
     exit 1
   fi
   ensure_dirs
@@ -465,7 +465,7 @@ cmd_install_watch() {
   launchctl load "$WATCH_PLIST"
   ok "Watcher installed. Drop files into recordings/ and notes show up in output/"
   echo "    Plist: $WATCH_PLIST"
-  echo "    Remove with: ./meet uninstall-watch"
+  echo "    Remove with: ./skip uninstall-watch"
 }
 
 cmd_uninstall_watch() {
@@ -480,13 +480,18 @@ cmd_uninstall_watch() {
 
 main() {
   local cmd="${1:-help}"
+  # Shortcut: ./skip recording.mov
+  if [[ -n "$cmd" && -f "$cmd" ]]; then
+    cmd_transcribe "$@"
+    return
+  fi
   shift || true
   case "$cmd" in
     help|-h|--help) usage ;;
     setup) cmd_setup "$@" ;;
     doctor) cmd_doctor "$@" ;;
     config) cmd_config "$@" ;;
-    transcribe|run|process) cmd_transcribe "$@" ;;
+    recap|transcribe|run|process) cmd_transcribe "$@" ;;
     drop|add) cmd_drop "$@" ;;
     watch) cmd_watch "$@" ;;
     status) cmd_status "$@" ;;

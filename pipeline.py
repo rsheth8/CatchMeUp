@@ -5,8 +5,8 @@ Process one meeting recording end to end:
   -> Claude analysis (TL;DR + bookmarked insights + detailed notes)
   -> .docx report in output/ -> archive the source files.
 
-Prefer the `./meet` CLI over calling this file directly:
-  ./meet transcribe <path-to-recording>
+Prefer the `./skip` CLI over calling this file directly:
+  ./skip recap <path-to-recording>
 """
 import json
 import os
@@ -77,7 +77,7 @@ def which_bin(name, env_var, fallbacks):
     raise FileNotFoundError(
         f"{name} not found. Install it with Homebrew:\n"
         f"  brew install {name}\n"
-        f"Then re-run: ./meet doctor"
+        f"Then re-run: ./skip doctor"
     )
 
 
@@ -137,7 +137,7 @@ def transcribe(mp3_path: Path) -> dict:
     if not json_path.exists():
         raise FileNotFoundError(
             f"WhisperKit did not write {json_path.name}. "
-            "Run `./meet doctor` and try again."
+            "Run `./skip doctor` and try again."
         )
     return json.loads(json_path.read_text())
 
@@ -245,7 +245,7 @@ def archive(*paths: Path, dest_dir: Path):
 
 def main():
     if len(sys.argv) != 2:
-        print(f"Usage: ./meet transcribe <recording-path>")
+        print("Usage: ./skip recap <recording-path>")
         print(f"   or: {sys.argv[0]} <recording-path>")
         sys.exit(1)
 

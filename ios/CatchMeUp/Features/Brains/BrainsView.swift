@@ -9,7 +9,7 @@ struct BrainsView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if store.brains.isEmpty {
+                if store.visibleBrains.isEmpty {
                     ScrollView {
                         Card {
                             EmptyState(symbol: "brain",
@@ -21,13 +21,14 @@ struct BrainsView: View {
                     .background(Color.groupBG)
                 } else {
                     List {
-                        ForEach(store.brains) { brain in
+                        ForEach(store.visibleBrains) { brain in
                             NavigationLink(value: brain.id) {
                                 BrainRow(brain: brain, count: store.recordings(inBrain: brain.id).count)
                             }
                         }
                         .onDelete { idx in
-                            idx.map { store.brains[$0] }.forEach(store.delete)
+                            let visible = store.visibleBrains
+                            idx.map { visible[$0] }.forEach(store.delete)
                         }
                     }
                 }

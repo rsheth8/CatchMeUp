@@ -301,7 +301,7 @@ struct RecapDetailView: View {
 
                     Menu("Add to brain") {
                         Button("None") { store.assign(recordingID, toBrain: nil) }
-                        ForEach(store.brains) { b in
+                        ForEach(store.visibleBrains) { b in
                             Button(b.name) { store.assign(recordingID, toBrain: b.id) }
                         }
                     }

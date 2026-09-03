@@ -55,6 +55,20 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Toggle("Sync with iCloud", isOn: Binding(
+                        get: { store.syncEnabled },
+                        set: { store.syncEnabled = $0 }
+                    ))
+                } header: {
+                    Text("Sync")
+                } footer: {
+                    Label(store.syncStatus.text,
+                          systemImage: store.syncStatus.symbolName)
+                        .font(.footnote)
+                        .foregroundStyle(store.syncStatus.isProblem ? .orange : .secondary)
+                }
+
                 Section("Default recap style") {
                     Picker("Style", selection: $settings.defaultMode) {
                         ForEach(Mode.allCases) { Text($0.title).tag($0) }
@@ -68,7 +82,7 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Transcription", value: "Apple Speech · on device")
-                    LabeledContent("Recaps saved", value: "\(store.recordings.count)")
+                    LabeledContent("Recaps saved", value: "\(store.sortedRecordings.count)")
                     LabeledContent("Version", value: "0.1.0 (beta)")
                 } header: {
                     Text("About")

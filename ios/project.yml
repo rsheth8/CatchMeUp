@@ -13,6 +13,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     GENERATE_INFOPLIST_FILE: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     TARGETED_DEVICE_FAMILY: "1,2"
@@ -34,3 +35,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app
         INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleDefault
+        CODE_SIGN_ENTITLEMENTS: CatchMeUp/CatchMeUp.entitlements

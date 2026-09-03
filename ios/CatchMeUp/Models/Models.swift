@@ -169,6 +169,8 @@ struct Recording: Codable, Identifiable, Hashable {
     var id = UUID()
     var title: String
     var createdAt = Date()
+    var updatedAt = Date()
+    var deleted = false
     var mode: Mode
     var audioFilename: String?
     var duration: Double = 0
@@ -183,6 +185,35 @@ struct Recording: Codable, Identifiable, Hashable {
     }
 
     var isProcessed: Bool { recap != nil }
+
+    init(id: UUID = UUID(), title: String, createdAt: Date = Date(), mode: Mode,
+         audioFilename: String? = nil, duration: Double = 0, segments: [Segment] = [],
+         recap: Recap? = nil, brainID: UUID? = nil) {
+        self.id = id; self.title = title; self.createdAt = createdAt; self.updatedAt = createdAt
+        self.mode = mode; self.audioFilename = audioFilename; self.duration = duration
+        self.segments = segments; self.recap = recap; self.brainID = brainID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, createdAt, updatedAt, deleted, mode, audioFilename
+        case duration, segments, recap, brainID, processingError
+    }
+
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+        mode = try c.decode(Mode.self, forKey: .mode)
+        audioFilename = try c.decodeIfPresent(String.self, forKey: .audioFilename)
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+        segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
+        recap = try c.decodeIfPresent(Recap.self, forKey: .recap)
+        brainID = try c.decodeIfPresent(UUID.self, forKey: .brainID)
+        processingError = try c.decodeIfPresent(String.self, forKey: .processingError)
+    }
 }
 
 // MARK: - Brain
@@ -193,6 +224,28 @@ struct Brain: Codable, Identifiable, Hashable {
     var persona: String = ""
     var mode: Mode = .lecture
     var createdAt = Date()
+    var updatedAt = Date()
+    var deleted = false
+
+    init(id: UUID = UUID(), name: String, persona: String = "", mode: Mode = .lecture, createdAt: Date = Date()) {
+        self.id = id; self.name = name; self.persona = persona; self.mode = mode
+        self.createdAt = createdAt; self.updatedAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, persona, mode, createdAt, updatedAt, deleted
+    }
+
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        persona = try c.decodeIfPresent(String.self, forKey: .persona) ?? ""
+        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .lecture
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+    }
 }
 
 // MARK: - Errors

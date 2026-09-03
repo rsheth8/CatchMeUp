@@ -110,6 +110,7 @@ class IsolatedHome(unittest.TestCase):
                 "CATCHMEUP_SYNC",
                 "CATCHMEUP_SYNC_DIR",
                 "CATCHMEUP_SYNC_AUDIO",
+                "CATCHMEUP_CHUNK_CHARS",
             )
         }
         os.environ["CATCHMEUP_HOME"] = str(self.home)
@@ -117,6 +118,7 @@ class IsolatedHome(unittest.TestCase):
         os.environ.pop("CATCHMEUP_MODE", None)
         os.environ.pop("CATCHMEUP_SYNC_DIR", None)
         os.environ.pop("CATCHMEUP_SYNC_AUDIO", None)
+        os.environ.pop("CATCHMEUP_CHUNK_CHARS", None)
         os.environ["CATCHMEUP_SYNC"] = "0"
         for name in ("recordings", "output", "processed", "logs", "brains"):
             (self.home / name).mkdir(parents=True, exist_ok=True)

@@ -340,12 +340,33 @@ struct RecapDetailView: View {
             section("Terms", "character.book.closed", trailing: "\(terms.count)") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(terms.enumerated()), id: \.element.id) { idx, t in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(t.term).font(.subheadline.weight(.semibold)).foregroundStyle(Color.amber)
-                            Text(md: t.definition).font(.subheadline).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            if let rec = recording,
+                               let hit = ClipSearch.find(query: t.term, in: [rec]),
+                               rec.hasAudio {
+                                Haptics.tap()
+                                play(from: hit.start)
+                            }
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(t.term).font(.subheadline.weight(.semibold)).foregroundStyle(Color.amber)
+                                    Text(md: t.definition).font(.subheadline).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                Spacer(minLength: 0)
+                                if recording?.hasAudio == true {
+                                    Image(systemName: "play.circle")
+                                        .font(.title3)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 8)
+                        .buttonStyle(.plain)
+                        .disabled(recording?.hasAudio != true)
                         if idx < terms.count - 1 { Divider().opacity(0.4) }
                     }
                 }

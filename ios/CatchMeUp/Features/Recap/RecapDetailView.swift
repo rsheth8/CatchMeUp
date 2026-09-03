@@ -13,6 +13,8 @@ struct RecapDetailView: View {
     @State private var showTranscript = false
     @State private var scrubbing = false
     @State private var scrubValue: Double = 0
+    @State private var reminderNotice: ReminderNotice?
+    @State private var showMissingAudio = false
 
     private var recording: Recording? { store.recording(recordingID) }
 
@@ -31,6 +33,27 @@ struct RecapDetailView: View {
         .task(id: recordingID) { await maybeProcess() }
         .onAppear { loadAudio() }
         .onDisappear { player.stop() }
+        .userActivity(CatchMeUpLink.recapActivityType, isActive: recording != nil) { activity in
+            guard let rec = recording else { return }
+            let link = CatchMeUpLink.recap(rec.id)
+            activity.title = rec.displayTitle
+            activity.userInfo = ["recordingID": rec.id.uuidString, "deepLink": link.absoluteString]
+            activity.targetContentIdentifier = link.absoluteString
+            activity.isEligibleForHandoff = true
+            activity.isEligibleForSearch = true
+        }
+        .alert(item: $reminderNotice) { notice in
+            Alert(
+                title: Text(notice.isError ? "Couldn't Add Reminder" : "Added to Reminders"),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .alert("Audio isn't on this device", isPresented: $showMissingAudio) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This recap's notes and transcript are available, but its original recording wasn't imported. Add the audio to play key moments.")
+        }
         .sheet(isPresented: $showTranscript) {
             if let rec = recording {
                 TranscriptView(recording: rec) { seconds in
@@ -142,23 +165,46 @@ struct RecapDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
                         let done = rec.completedActions.contains(idx)
-                        Button {
-                            Haptics.tap()
-                            withAnimation(.quick) { store.toggleAction(rec.id, index: idx) }
-                        } label: {
-                            HStack(alignment: .top, spacing: 11) {
-                                Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                                    .font(.body)
-                                    .foregroundStyle(done ? Color.brand : Color.secondary.opacity(0.5))
-                                Text(item)
-                                    .font(.subheadline)
-                                    .strikethrough(done, color: .secondary)
-                                    .foregroundStyle(done ? .secondary : .primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(alignment: .top, spacing: 8) {
+                            Button {
+                                Haptics.tap()
+                                withAnimation(.quick) { store.toggleAction(rec.id, index: idx) }
+                            } label: {
+                                HStack(alignment: .top, spacing: 11) {
+                                    Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                                        .font(.body)
+                                        .foregroundStyle(done ? Color.brand : Color.secondary.opacity(0.5))
+                                    Text(item)
+                                        .font(.subheadline)
+                                        .strikethrough(done, color: .secondary)
+                                        .foregroundStyle(done ? .secondary : .primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 7)
+                            .buttonStyle(.plain)
+
+                            Menu {
+                                Button {
+                                    Task { await addToReminders(item, from: rec) }
+                                } label: {
+                                    Label("Add to Reminders", systemImage: "checklist")
+                                }
+                                Button {
+                                    UIPasteboard.general.string = item
+                                    Haptics.success()
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 5)
                         if idx < items.count - 1 { Divider().opacity(0.4) }
                     }
                 }
@@ -260,7 +306,13 @@ struct RecapDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(marks.enumerated()), id: \.element.id) { idx, m in
                         Button {
-                            if let s = m.seconds { Haptics.tap(); player.play(from: s) }
+                            if player.isLoaded, let s = m.seconds {
+                                Haptics.tap()
+                                player.play(from: s)
+                            } else {
+                                Haptics.warning()
+                                showMissingAudio = true
+                            }
                         } label: {
                             HStack(alignment: .top, spacing: 11) {
                                 Text(shortStamp(m.timestamp))
@@ -273,7 +325,7 @@ struct RecapDetailView: View {
                                     Text(m.insight).font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: "play.circle.fill")
+                                Image(systemName: player.isLoaded ? "play.circle.fill" : "waveform.slash")
                                     .font(.title3)
                                     .foregroundStyle(.tertiary)
                             }
@@ -351,7 +403,7 @@ struct RecapDetailView: View {
     // MARK: - Player
 
     private var playerBar: some View {
-        VStack(spacing: 7) {
+        FloatingControlShelf(contentPadding: 10) {
             HStack(spacing: 14) {
                 Button { player.skip(-15) } label: {
                     Image(systemName: "gobackward.15").font(.title3)
@@ -394,13 +446,6 @@ struct RecapDetailView: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.hairline) }
-        .shadow(color: .black.opacity(0.10), radius: 14, y: 5)
-        .padding(.horizontal, 14)
-        .padding(.bottom, 6)
     }
 
     private func errorCard(_ msg: String) -> some View {
@@ -472,6 +517,17 @@ struct RecapDetailView: View {
         if recording?.recap != nil { Haptics.success() }
     }
 
+    private func addToReminders(_ item: String, from rec: Recording) async {
+        do {
+            try await ReminderExporter.add(title: item, recapTitle: rec.displayTitle)
+            Haptics.success()
+            reminderNotice = ReminderNotice(message: item, isError: false)
+        } catch {
+            Haptics.warning()
+            reminderNotice = ReminderNotice(message: error.localizedDescription, isError: true)
+        }
+    }
+
     private func initials(_ s: SpeakerNote) -> String {
         let source = s.name.isEmpty ? s.label : s.name
         let parts = source.split(separator: " ").prefix(2)
@@ -485,6 +541,12 @@ struct RecapDetailView: View {
         if parts.count == 3, parts[0] == "00" { return parts.dropFirst().joined(separator: ":") }
         return stamp
     }
+}
+
+private struct ReminderNotice: Identifiable {
+    let id = UUID()
+    let message: String
+    let isError: Bool
 }
 
 // MARK: - Processing card

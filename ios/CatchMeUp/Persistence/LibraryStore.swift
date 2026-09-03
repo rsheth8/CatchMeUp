@@ -25,6 +25,7 @@ final class LibraryStore {
 
         refreshSyncMode()
         load()
+        SpotlightIndexer.replace(with: recordings)
 
         appObserverToken = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
@@ -205,7 +206,10 @@ final class LibraryStore {
         }
     }
 
-    private func saveRecordings() { write(recordings, to: recordingsFile) }
+    private func saveRecordings() {
+        write(recordings, to: recordingsFile)
+        SpotlightIndexer.replace(with: recordings)
+    }
     private func saveBrains() { write(brains, to: brainsFile) }
 
     private func write<T: Encodable>(_ value: T, to url: URL) {

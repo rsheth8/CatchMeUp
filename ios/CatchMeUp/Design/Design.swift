@@ -27,6 +27,31 @@ struct Card<Content: View>: View {
     }
 }
 
+// MARK: - Floating bottom controls
+
+/// A shared shelf for controls that sit above a tab bar or home indicator.
+/// Keeping the material inside the screen gutter prevents the heavy, double-
+/// bar look that happens when a custom control touches the system tab bar.
+struct FloatingControlShelf<Content: View>: View {
+    var contentPadding: CGFloat = 10
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(contentPadding)
+            .background(.regularMaterial,
+                        in: RoundedRectangle(cornerRadius: Metric.controlRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Metric.controlRadius, style: .continuous)
+                    .strokeBorder(Color.hairline)
+            }
+            .shadow(color: .black.opacity(0.10), radius: 14, y: 5)
+            .padding(.horizontal, Metric.gutter)
+            .padding(.top, 6)
+            .padding(.bottom, Metric.floatingGap)
+    }
+}
+
 // MARK: - Section header
 
 struct SectionHeader<Accessory: View>: View {

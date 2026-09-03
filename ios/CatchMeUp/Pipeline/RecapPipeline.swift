@@ -24,6 +24,7 @@ final class RecapPipeline {
     }
 
     var stage: Stage = .idle
+    private let liveActivity = RecapLiveActivity()
     var isRunning: Bool {
         switch stage { case .idle, .done, .failed: return false; default: return true }
     }
@@ -31,6 +32,7 @@ final class RecapPipeline {
     /// Full run for a freshly captured or imported recording.
     func process(recordingID: UUID, store: LibraryStore, settings: AppSettings) async {
         guard var rec = store.recording(recordingID) else { return }
+        await liveActivity.start(for: rec)
         rec.processingError = nil
         store.upsert(rec)
 
@@ -40,10 +42,13 @@ final class RecapPipeline {
         do {
             if let audio = store.audioURL(for: rec) {
                 let segments = try await transcriber.transcribe(url: audio) { [weak self] p in
-                    Task { @MainActor in self?.stage = .transcribing(p) }
+                    Task { @MainActor in
+                        self?.stage = .transcribing(p)
+                        await self?.liveActivity.transcription(progress: p)
+                    }
                 }
                 rec.segments = segments
-                rec.duration = AVURLAsset(url: audio).duration.seconds
+                rec.duration = try await AVURLAsset(url: audio).load(.duration).seconds
             } else if rec.segments.isEmpty {
                 rec.segments = SampleData.meetingRecording.segments
             }
@@ -55,12 +60,14 @@ final class RecapPipeline {
 
         // 2. Recap
         stage = .writing
+        await liveActivity.writing()
         let engine = RecapEngineFactory.make(settings)
         do {
             let recap = try await engine.makeRecap(transcript: rec.segments.timestampedText, mode: rec.mode)
             rec.recap = recap
             store.upsert(rec)
             stage = .done
+            await liveActivity.finish(success: true)
         } catch {
             fail(&rec, store, error.localizedDescription)
         }
@@ -69,13 +76,16 @@ final class RecapPipeline {
     /// Re-run only the notes step (e.g. after switching engine).
     func rewrite(recordingID: UUID, store: LibraryStore, settings: AppSettings) async {
         guard var rec = store.recording(recordingID), !rec.segments.isEmpty else { return }
+        await liveActivity.start(for: rec)
         stage = .writing
+        await liveActivity.writing()
         let engine = RecapEngineFactory.make(settings)
         do {
             rec.recap = try await engine.makeRecap(transcript: rec.segments.timestampedText, mode: rec.mode)
             rec.processingError = nil
             store.upsert(rec)
             stage = .done
+            await liveActivity.finish(success: true)
         } catch {
             fail(&rec, store, error.localizedDescription)
         }
@@ -85,5 +95,6 @@ final class RecapPipeline {
         rec.processingError = message
         store.upsert(rec)
         stage = .failed(message)
+        Task { await liveActivity.finish(success: false) }
     }
 }

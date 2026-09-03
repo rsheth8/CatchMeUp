@@ -80,6 +80,36 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledContent {
+                        Text("Automatic")
+                    } label: {
+                        Label("Spotlight Search", systemImage: "magnifyingglass")
+                    }
+                    LabeledContent {
+                        Text("3 actions")
+                    } label: {
+                        Label("Siri & Shortcuts", systemImage: "mic.badge.plus")
+                    }
+                    LabeledContent {
+                        Text("On")
+                    } label: {
+                        Label("Live Activities", systemImage: "waveform.badge.mic")
+                    }
+                    LabeledContent {
+                        Text("On")
+                    } label: {
+                        Label("Background Recording", systemImage: "lock.iphone")
+                    }
+                    Link(destination: URL(string: "shortcuts://")!) {
+                        Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
+                    }
+                } header: {
+                    Text("Apple integrations")
+                } footer: {
+                    Text("Find recaps from the Home Screen, record while your iPhone is locked, start with Siri, follow progress on the Lock Screen or Dynamic Island, and continue a recap on another Apple device.")
+                }
+
+                Section {
                     Picker(selection: $settings.defaultMode) {
                         ForEach(Mode.allCases) { Text($0.title).tag($0) }
                     } label: {
@@ -110,7 +140,7 @@ struct SettingsView: View {
                     LabeledContent("Transcription", value: "Apple Speech · on device")
                     LabeledContent("Recaps saved", value: "\(store.sortedRecordings.count)")
                     LabeledContent("Brains", value: "\(store.visibleBrains.count)")
-                    LabeledContent("Version", value: "0.1.0 (beta)")
+                    LabeledContent("Version", value: appVersion)
                 } header: {
                     Text("About")
                 } footer: {
@@ -119,6 +149,12 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
         }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "\(version) (\(build))"
     }
 }
 

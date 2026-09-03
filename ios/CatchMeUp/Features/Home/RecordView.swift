@@ -32,7 +32,7 @@ struct RecordView: View {
                 Spacer()
                 status
                 controls
-                    .padding(.bottom, 26)
+                    .padding(.bottom, Metric.gutter)
             }
         }
         .task {

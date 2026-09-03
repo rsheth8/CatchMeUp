@@ -47,6 +47,9 @@ enum Metric {
     static let tile: CGFloat = 14      // icon tile corner radius
     static let gutter: CGFloat = 16
     static let rowGap: CGFloat = 10
+    /// Air between a floating control and the system tab bar / home indicator.
+    static let floatingGap: CGFloat = 12
+    static let controlRadius: CGFloat = 20
 }
 
 // MARK: - Motion

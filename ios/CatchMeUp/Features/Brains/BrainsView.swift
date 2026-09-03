@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BrainsView: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(AppRouter.self) private var router
     @State private var showNew = false
     @State private var newName = ""
     @State private var newMode: Mode = .lecture
@@ -9,7 +10,9 @@ struct BrainsView: View {
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
-        NavigationStack {
+        @Bindable var router = router
+
+        NavigationStack(path: $router.brainPath) {
             ScrollView {
                 if store.visibleBrains.isEmpty {
                     EmptyState(symbol: "brain",
@@ -50,6 +53,14 @@ struct BrainsView: View {
                 Button { showNew = true } label: { Image(systemName: "plus") }
             }
             .sheet(isPresented: $showNew) { newBrainSheet }
+            .sheet(isPresented: Binding(
+                get: { router.brainGraphID != nil },
+                set: { if !$0 { router.brainGraphID = nil } }
+            )) {
+                if let id = router.brainGraphID, let brain = store.brain(id) {
+                    BrainGraphScreen(brain: brain, recordings: store.recordings(inBrain: id))
+                }
+            }
         }
     }
 
@@ -140,6 +151,7 @@ struct BrainDetailView: View {
     @State private var askError: String?
     @State private var showPersona = false
     @State private var personaDraft = ""
+    @State private var showGraph = false
 
     struct QAExchange: Identifiable, Equatable {
         let id = UUID()
@@ -155,6 +167,7 @@ struct BrainDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if let brain {
                         personaCard(brain)
+                        neuralMapCard(brain)
 
                         if thread.isEmpty {
                             starters(brain)
@@ -191,6 +204,11 @@ struct BrainDetailView: View {
             }
         }
         .sheet(isPresented: $showPersona) { personaSheet }
+        .sheet(isPresented: $showGraph) {
+            if let brain {
+                BrainGraphScreen(brain: brain, recordings: store.recordings(inBrain: brainID))
+            }
+        }
     }
 
     // MARK: Persona
@@ -240,6 +258,43 @@ struct BrainDetailView: View {
     }
 
     // MARK: Conversation
+
+    private func neuralMapCard(_ brain: Brain) -> some View {
+        let graph = BrainGraph.build(from: store.recordings(inBrain: brainID))
+        return Button {
+            Haptics.tap()
+            showGraph = true
+        } label: {
+            HStack(spacing: 13) {
+                MiniBrainGraph(graph: graph, tint: brain.mode.accent)
+                    .frame(width: 78, height: 58)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Neural map")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(graph.nodes.isEmpty
+                         ? "Add recaps to grow this brain"
+                         : "\(graph.nodes.count) concepts · \(graph.edges.count) connections")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(13)
+            .background(Color.cardBG,
+                        in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
+                    .strokeBorder(Color.hairline)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(graph.nodes.isEmpty)
+    }
 
     @ViewBuilder
     private func starters(_ brain: Brain) -> some View {
@@ -348,32 +403,30 @@ struct BrainDetailView: View {
     // MARK: Composer
 
     private var composer: some View {
-        HStack(spacing: 10) {
-            TextField("Ask across these recaps…", text: $question, axis: .vertical)
-                .lineLimit(1...4)
-                .font(.subheadline)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .background(Color.cardBG, in: Capsule())
-                .overlay { Capsule().strokeBorder(Color.hairline) }
+        FloatingControlShelf(contentPadding: 8) {
+            HStack(spacing: 9) {
+                TextField("Ask across these recaps…", text: $question, axis: .vertical)
+                    .lineLimit(1...4)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.cardBG, in: Capsule())
+                    .overlay { Capsule().strokeBorder(Color.hairline) }
 
-            Button {
-                Task { await ask() }
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background((brain?.mode.accent ?? .brand).gradient, in: Circle())
+                Button {
+                    Task { await ask() }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background((brain?.mode.accent ?? .brand).gradient, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
+                .opacity(asking || question.trimmingCharacters(in: .whitespaces).isEmpty ? 0.4 : 1)
             }
-            .buttonStyle(.plain)
-            .disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
-            .opacity(asking || question.trimmingCharacters(in: .whitespaces).isEmpty ? 0.4 : 1)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(.regularMaterial)
     }
 
     // MARK: Ask

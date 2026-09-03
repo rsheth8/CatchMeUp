@@ -40,17 +40,17 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
 struct LibraryView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(AppSettings.self) private var settings
+    @Environment(AppRouter.self) private var router
 
-    @State private var path: [UUID] = []
-    @State private var showRecorder = false
     @State private var showImporter = false
-    @State private var query = ""
     @State private var filter: LibraryFilter = .all
     @State private var renameTarget: Recording?
     @State private var renameText = ""
 
     var body: some View {
-        NavigationStack(path: $path) {
+        @Bindable var router = router
+
+        NavigationStack(path: $router.libraryPath) {
             Group {
                 if store.sortedRecordings.isEmpty {
                     emptyLibrary
@@ -72,14 +72,16 @@ struct LibraryView: View {
                     .accessibilityLabel("Add a file")
                 }
             }
-            // Reserve the room first, then paint the scrim + button over the
-            // whole bottom edge — so content dissolves rather than colliding.
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 120) }
-            .overlay(alignment: .bottom) { bottomBar }
-            .fullScreenCover(isPresented: $showRecorder) {
-                RecordView(initialMode: settings.defaultMode) { newID in
-                    showRecorder = false
-                    path.append(newID)
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+            .fullScreenCover(isPresented: Binding(
+                get: { router.recorderMode != nil },
+                set: { if !$0 { router.recorderMode = nil } }
+            )) {
+                if let mode = router.recorderMode {
+                    RecordView(initialMode: mode) { newID in
+                        router.recorderMode = nil
+                        router.libraryPath.append(newID)
+                    }
                 }
             }
             .fileImporter(isPresented: $showImporter,
@@ -114,7 +116,7 @@ struct LibraryView: View {
                 ForEach(Array(buckets.enumerated()), id: \.element.title) { bucketIdx, bucket in
                     Section {
                         ForEach(bucket.items) { rec in
-                            Button { path.append(rec.id) } label: {
+                            Button { router.libraryPath.append(rec.id) } label: {
                                 RecapRow(recording: rec,
                                          brainName: store.brain(rec.brainID)?.name,
                                          isLit: rec.id == latestID,
@@ -149,7 +151,10 @@ struct LibraryView: View {
         .listStyle(.plain)
         .listSectionSpacing(0)          // the chapter header carries its own air
         .scrollContentBackground(.hidden)
-        .searchable(text: $query, prompt: "Search titles and notes")
+        .searchable(text: Binding(
+            get: { router.libraryQuery },
+            set: { router.libraryQuery = $0 }
+        ), prompt: "Search titles and notes")
         .animation(.quick, value: filter)
     }
 
@@ -221,9 +226,9 @@ struct LibraryView: View {
     private var noResults: some View {
         EmptyState(symbol: "magnifyingglass",
                    title: "Nothing here",
-                   message: query.isEmpty
+                   message: router.libraryQuery.isEmpty
                         ? "No recaps match this filter yet."
-                        : "No recap mentions “\(query)”.")
+                        : "No recap mentions “\(router.libraryQuery)”.")
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
     }
@@ -270,7 +275,7 @@ struct LibraryView: View {
                 ],
                 startPoint: .top, endPoint: .bottom
             )
-            .frame(height: 140)
+            .frame(height: 88)
             .allowsHitTesting(false)
 
             recordButton
@@ -280,7 +285,7 @@ struct LibraryView: View {
     private var recordButton: some View {
         Button {
             Haptics.tap(.medium)
-            showRecorder = true
+            router.recorderMode = settings.defaultMode
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: "mic.fill")
@@ -298,7 +303,7 @@ struct LibraryView: View {
             .shadow(color: Color.brand.opacity(0.38), radius: 18, y: 8)
         }
         .buttonStyle(.plain)
-        .padding(.bottom, 16)
+        .padding(.bottom, Metric.floatingGap)
     }
 
     // MARK: - Row menu
@@ -333,7 +338,7 @@ struct LibraryView: View {
     private struct Bucket { let title: String; let items: [Recording] }
 
     private var filtered: [Recording] {
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let q = router.libraryQuery.trimmingCharacters(in: .whitespaces)
         return store.sortedRecordings.filter { rec in
             filter.matches(rec) && (q.isEmpty || rec.searchBlob.localizedCaseInsensitiveContains(q))
         }
@@ -384,7 +389,7 @@ struct LibraryView: View {
                             audioFilename: filename)
         store.upsert(rec)
         Haptics.success()
-        path.append(rec.id)
+        router.libraryPath.append(rec.id)
     }
 }
 

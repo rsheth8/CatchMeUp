@@ -1,0 +1,9 @@
+# XcodeGen regenerates this from project.yml
+CatchMeUp.xcodeproj/
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+build/

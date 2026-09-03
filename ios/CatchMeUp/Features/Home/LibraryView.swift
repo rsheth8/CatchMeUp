@@ -1,8 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// The library is the app's home: your recaps first, one obvious way to make
-// another. Mode is chosen when you record, not before.
+// The library reads as one continuous thread — the same idea as the app icon.
+// Each recap is a node on the rail; the newest one is lit, the way the icon's
+// middle node marks the moment you're caught up to.
 
 enum LibraryFilter: String, CaseIterable, Identifiable {
     case all, meetings, lectures, attention
@@ -18,19 +19,9 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    var symbol: String? {
-        switch self {
-        case .all: return nil
-        case .meetings: return "person.2.wave.2"
-        case .lectures: return "graduationcap"
-        case .attention: return "exclamationmark.triangle"
-        }
-    }
-
     var tint: Color {
         switch self {
-        case .all: return .brand
-        case .meetings: return .brand
+        case .all, .meetings: return .brand
         case .lectures: return .amber
         case .attention: return .orange
         }
@@ -64,13 +55,27 @@ struct LibraryView: View {
                 if store.sortedRecordings.isEmpty {
                     emptyLibrary
                 } else {
-                    list
+                    thread
                 }
             }
             .background(AmbientBackground())
             .navigationTitle("Recaps")
             .navigationDestination(for: UUID.self) { RecapDetailView(recordingID: $0) }
-            .safeAreaInset(edge: .bottom) { actionBar }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Haptics.tap()
+                        showImporter = true
+                    } label: {
+                        Image(systemName: "waveform.badge.plus")
+                    }
+                    .accessibilityLabel("Add a file")
+                }
+            }
+            // Reserve the room first, then paint the scrim + button over the
+            // whole bottom edge — so content dissolves rather than colliding.
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 120) }
+            .overlay(alignment: .bottom) { bottomBar }
             .fullScreenCover(isPresented: $showRecorder) {
                 RecordView(initialMode: settings.defaultMode) { newID in
                     showRecorder = false
@@ -95,27 +100,31 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - List
+    // MARK: - The thread
 
-    private var list: some View {
+    private var thread: some View {
         List {
-            if !settings.isReady { readinessBanner }
+            if !settings.isReady { readinessRow }
 
-            if store.sortedRecordings.count > 3 || filter != .all {
-                filterRow
-            }
+            headerRow
 
             if buckets.isEmpty {
                 noResults
             } else {
-                ForEach(buckets, id: \.title) { bucket in
+                ForEach(Array(buckets.enumerated()), id: \.element.title) { bucketIdx, bucket in
                     Section {
                         ForEach(bucket.items) { rec in
                             Button { path.append(rec.id) } label: {
-                                RecapRow(recording: rec, brainName: store.brain(rec.brainID)?.name)
+                                RecapRow(recording: rec,
+                                         brainName: store.brain(rec.brainID)?.name,
+                                         isLit: rec.id == latestID,
+                                         // first/last of the whole thread, so the
+                                         // rail runs unbroken across chapters
+                                         isFirst: rec.id == filtered.first?.id,
+                                         isLast: rec.id == filtered.last?.id)
                             }
-                            .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .buttonStyle(ThreadRowStyle(tint: rec.mode.accent))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 18))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                             .swipeActions(edge: .trailing) {
@@ -126,59 +135,85 @@ struct LibraryView: View {
                             .contextMenu { rowMenu(rec) }
                         }
                     } header: {
-                        Text(bucket.title)
-                            .font(.caption.weight(.semibold))
-                            .tracking(0.7)
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
+                        ChapterHeader(title: bucket.title, showsRail: bucketIdx > 0)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 18))
                     }
-                    .listSectionSeparator(.hidden)
                 }
             }
 
             Color.clear
-                .frame(height: 76)
+                .frame(height: 6)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
+        .listSectionSpacing(0)          // the chapter header carries its own air
         .scrollContentBackground(.hidden)
         .searchable(text: $query, prompt: "Search titles and notes")
         .animation(.quick, value: filter)
     }
 
-    private var filterRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(LibraryFilter.allCases) { f in
-                    if f != .attention || store.sortedRecordings.contains(where: LibraryFilter.attention.matches) {
-                        FilterChip(title: f.title, symbol: f.symbol,
-                                   isOn: filter == f, tint: f.tint) { filter = f }
+    // MARK: - Header (summary + filters)
+
+    private var headerRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(summary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if showsFilters {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 7) {
+                        ForEach(visibleFilters) { f in
+                            filterPill(f)
+                        }
                     }
+                    .padding(.horizontal, 18)
                 }
+                .padding(.horizontal, -18)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 2)
         }
-        .listRowInsets(EdgeInsets())
+        .padding(.bottom, 4)
+        .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 8, trailing: 18))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
     }
 
-    private var readinessBanner: some View {
+    private func filterPill(_ f: LibraryFilter) -> some View {
+        let isOn = filter == f
+        return Button {
+            Haptics.tap()
+            withAnimation(.quick) { filter = f }
+        } label: {
+            Text(f.title)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 6.5)
+                .foregroundStyle(isOn ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .background {
+                    Capsule().fill(isOn
+                                   ? AnyShapeStyle(f.tint.gradient)
+                                   : AnyShapeStyle(Color.primary.opacity(0.055)))
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var readinessRow: some View {
         HStack(spacing: 11) {
-            IconTile(symbol: "exclamationmark", tint: .orange, size: 34)
-            VStack(alignment: .leading, spacing: 2) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Finish setup").font(.subheadline.weight(.semibold))
                 Text(settings.readinessHint).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
         .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.10),
                     in: RoundedRectangle(cornerRadius: Metric.tile, style: .continuous))
-        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 2, leading: 18, bottom: 10, trailing: 18))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
     }
@@ -220,53 +255,50 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Bottom action bar
+    // MARK: - Record button
+    //
+    // A single floating pill rather than a full-width bar, so it doesn't stack
+    // up against the tab bar. The fade above it dissolves scrolling content.
 
-    private var actionBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                Haptics.tap()
-                showImporter = true
-            } label: {
-                Image(systemName: "waveform.badge.plus")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.brand)
-                    .frame(width: 52, height: 52)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay { Circle().strokeBorder(Color.hairline) }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Add a file")
+    private var bottomBar: some View {
+        ZStack(alignment: .bottom) {
+            LinearGradient(
+                stops: [
+                    .init(color: Color.groupBG.opacity(0), location: 0),
+                    .init(color: Color.groupBG, location: 0.55),
+                    .init(color: Color.groupBG, location: 1),
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 140)
+            .allowsHitTesting(false)
 
-            Button {
-                Haptics.tap(.medium)
-                showRecorder = true
-            } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: "mic.fill")
-                    Text("Record")
-                }
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(
-                    LinearGradient(colors: [.brandLight, .brand],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: Capsule()
-                )
-                .shadow(color: Color.brand.opacity(0.35), radius: 16, y: 7)
+            recordButton
+        }
+    }
+
+    private var recordButton: some View {
+        Button {
+            Haptics.tap(.medium)
+            showRecorder = true
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "mic.fill")
+                Text("Record")
             }
-            .buttonStyle(.plain)
+            .font(.headline)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 30)
+            .frame(height: 54)
+            .background(
+                LinearGradient(colors: [.brandLight, .brand],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: Capsule()
+            )
+            .shadow(color: Color.brand.opacity(0.38), radius: 18, y: 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
-        .background {
-            LinearGradient(colors: [Color.groupBG.opacity(0), Color.groupBG.opacity(0.92)],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 16)
     }
 
     // MARK: - Row menu
@@ -307,6 +339,8 @@ struct LibraryView: View {
         }
     }
 
+    private var latestID: UUID? { store.sortedRecordings.first?.id }
+
     private var buckets: [Bucket] {
         let cal = Calendar.current
         var today: [Recording] = [], week: [Recording] = [], earlier: [Recording] = []
@@ -322,18 +356,82 @@ struct LibraryView: View {
             .filter { !$0.items.isEmpty }
     }
 
+    private var summary: String {
+        let all = store.sortedRecordings
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .distantPast
+        let recent = all.filter { $0.createdAt > weekAgo }.count
+        let total = "\(all.count) recap\(all.count == 1 ? "" : "s")"
+        return recent > 0 ? "\(total) · \(recent) this week" : total
+    }
+
+    private var visibleFilters: [LibraryFilter] {
+        LibraryFilter.allCases.filter { f in
+            f != .attention || store.sortedRecordings.contains(where: LibraryFilter.attention.matches)
+        }
+    }
+
+    private var showsFilters: Bool {
+        store.sortedRecordings.count > 3 || filter != .all
+    }
+
     // MARK: - Import
 
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         guard let filename = store.importAudio(from: url, preferredName: url.lastPathComponent) else { return }
-        let guessed = Mode.guess(fromFilename: url.lastPathComponent)
         let rec = Recording(title: url.deletingPathExtension().lastPathComponent,
-                            mode: guessed,
+                            mode: Mode.guess(fromFilename: url.lastPathComponent),
                             audioFilename: filename)
         store.upsert(rec)
         Haptics.success()
         path.append(rec.id)
+    }
+}
+
+// MARK: - Chapter header
+
+struct ChapterHeader: View {
+    let title: String
+    /// The thread runs on through every chapter break but the first.
+    var showsRail: Bool
+
+    var body: some View {
+        HStack(spacing: 15) {
+            Rectangle()
+                .fill(showsRail ? Color.primary.opacity(0.10) : .clear)
+                .frame(width: 1.5)
+                .frame(maxHeight: .infinity)
+                .frame(width: 26)
+
+            HStack(spacing: 10) {
+                Text(title.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.3)
+                    .foregroundStyle(.tertiary)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.07))
+                    .frame(height: 1)
+            }
+        }
+        .frame(height: 44)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+}
+
+// MARK: - Row press feedback
+
+struct ThreadRowStyle: ButtonStyle {
+    var tint: Color = .brand
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(tint.opacity(configuration.isPressed ? 0.09 : 0))
+                    .padding(.horizontal, -10)
+            }
+            .animation(.quick, value: configuration.isPressed)
     }
 }
 
@@ -342,63 +440,136 @@ struct LibraryView: View {
 struct RecapRow: View {
     let recording: Recording
     var brainName: String?
+    /// The newest recap in the library — drawn as the lit node.
+    var isLit = false
+    var isFirst = true
+    var isLast = true
+
+    @State private var pulse = false
+
+    private var nodeSize: CGFloat { isLit ? 26 : 11 }
+    private var railTop: CGFloat { isLit ? 1 : 8 }
+    private var rail: Color { Color.primary.opacity(0.10) }
 
     var body: some View {
-        HStack(spacing: 13) {
-            ZStack {
-                IconTile(symbol: recording.mode.symbol, tint: recording.mode.accent, size: 46)
-                if !recording.isProcessed && !recording.needsAttention {
-                    Circle()
-                        .strokeBorder(recording.mode.accent.opacity(0.5), lineWidth: 2)
-                        .frame(width: 52, height: 52)
-                }
+        HStack(alignment: .top, spacing: 15) {
+            spine
+            VStack(alignment: .leading, spacing: 5) {
+                titleLine
+                secondary
+                meta
             }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recording.displayTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-
-                HStack(spacing: 5) {
-                    Text(recording.createdAt.libraryStamp)
-                    if recording.duration > 0 {
-                        Text("·"); Text(durationText(recording.duration)).monospacedDigit()
-                    }
-                    if let brainName {
-                        Text("·")
-                        Label(brainName, systemImage: "brain")
-                            .labelStyle(.titleAndIcon)
-                            .lineLimit(1)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                if recording.needsAttention {
-                    Chip(text: "Needs attention", symbol: "exclamationmark.triangle.fill", tint: .orange)
-                } else if !recording.isProcessed {
-                    Chip(text: "Writing notes…", symbol: "sparkles", tint: recording.mode.accent)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.tertiary)
+            .padding(.vertical, 13)
         }
-        .padding(13)
-        .background {
-            RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
-                .fill(Color.cardBG)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: Spine
+
+    private var spine: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(isFirst ? Color.clear : rail)
+                .frame(width: 1.5, height: railTop + 13)
+            node
+            Rectangle()
+                .fill(isLast ? Color.clear : rail)
+                .frame(width: 1.5)
+                .frame(maxHeight: .infinity)
+        }
+        .frame(width: 26)
+        .frame(maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var node: some View {
+        if isLit {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(recording.mode.gradient)
+                .frame(width: 26, height: 26)
                 .overlay {
-                    RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
-                        .strokeBorder(Color.hairline)
+                    Image(systemName: "waveform")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
                 }
-                .shadow(color: .black.opacity(0.045), radius: 8, y: 3)
+                .shadow(color: recording.mode.accent.opacity(0.40), radius: 7, y: 2)
+        } else if recording.needsAttention {
+            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                .fill(Color.orange)
+                .frame(width: nodeSize, height: nodeSize)
+        } else if !recording.isProcessed {
+            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                .strokeBorder(recording.mode.accent, lineWidth: 2)
+                .frame(width: nodeSize, height: nodeSize)
+                .opacity(pulse ? 0.3 : 1)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                        pulse = true
+                    }
+                }
+        } else {
+            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                .fill(recording.mode.accent.opacity(0.85))
+                .frame(width: nodeSize, height: nodeSize)
         }
-        .contentShape(RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+    }
+
+    // MARK: Content
+
+    private var titleLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(recording.displayTitle)
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+            if recording.duration > 0 {
+                Text(durationText(recording.duration))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var secondary: some View {
+        if recording.needsAttention {
+            Label("Couldn't finish the notes — tap to retry", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.orange)
+                .lineLimit(2)
+        } else if !recording.isProcessed {
+            HStack(spacing: 7) {
+                ProgressView().controlSize(.mini)
+                Text("Writing your notes…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let gist = recording.recap?.tldr?.first, !gist.isEmpty {
+            Text(gist)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    private var meta: some View {
+        HStack(spacing: 5) {
+            Text(recording.mode.title)
+                .fontWeight(.semibold)
+                .foregroundStyle(recording.mode.accent)
+            Text("·")
+            Text(recording.createdAt.libraryStamp)
+            if let brainName {
+                Text("·")
+                Image(systemName: "brain").imageScale(.small)
+                Text(brainName).lineLimit(1)
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .padding(.top, 1)
     }
 }

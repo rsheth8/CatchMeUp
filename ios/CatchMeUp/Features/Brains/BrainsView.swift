@@ -334,11 +334,12 @@ struct BrainDetailView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             } else {
-                ForEach(recs) { rec in
+                ForEach(Array(recs.enumerated()), id: \.element.id) { idx, rec in
                     NavigationLink(value: rec.id) {
-                        RecapRow(recording: rec, brainName: nil)
+                        RecapRow(recording: rec, brainName: nil,
+                                 isFirst: idx == 0, isLast: idx == recs.count - 1)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ThreadRowStyle(tint: rec.mode.accent))
                 }
             }
         }

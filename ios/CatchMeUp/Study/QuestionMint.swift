@@ -101,6 +101,11 @@ enum QuestionMint {
         let prompt: String
         if looksLikeCode(name) {
             prompt = "What does `\(name)` mean here? Say what each part does, in a sentence or two."
+        } else if isPlural(name) {
+            // Recaps list plenty of terms in the plural ("environment
+            // diagrams"), and "what is an environment diagrams" is the kind of
+            // sentence that makes a reader distrust everything around it.
+            prompt = "What are \(lowercasedIfPlain(name))? One or two sentences, in your own words."
         } else {
             prompt = "What is \(withArticle(name))? One or two sentences, in your own words."
         }
@@ -349,8 +354,12 @@ enum QuestionMint {
 
     /// Strips a parenthetical, which is nearly always an aside rather than
     /// part of the term.
+    ///
+    /// An *empty* pair is the exception and is kept: `dict.get()` without its
+    /// parentheses stops looking like code, and the prompt then asks "what is a
+    /// dict.get?" instead of showing it in backticks.
     private static func displayTerm(_ term: String) -> String {
-        term.replacingOccurrences(of: "\\s*\\([^)]*\\)\\s*", with: " ", options: .regularExpression)
+        term.replacingOccurrences(of: "\\s*\\([^)]+\\)\\s*", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -401,11 +410,65 @@ enum QuestionMint {
         return titleCase ? text.lowercased() : text
     }
 
-    private static func withArticle(_ term: String) -> String {
+    static func withArticle(_ term: String) -> String {
         let t = lowercasedIfPlain(term)
         guard let first = t.first, first.isLetter, first.isLowercase else { return t }
+        guard !isUncountable(t) else { return t }
         return ("aeiou".contains(first) ? "an " : "a ") + t
     }
+
+    /// Terms that take no article — "What is clustering?", not "What is a
+    /// clustering?". Mostly gerunds, which is where lecture material lives:
+    /// half of what a CS course names is an activity (hashing, overfitting,
+    /// scaling) rather than a thing you can have two of.
+    ///
+    /// Deliberately narrow. Guessing wrong in this direction ("What is
+    /// function?") reads worse than the article it removes, so anything that
+    /// might be countable keeps its article — including -tion words, which are
+    /// countable often enough (a function, a partition, an exception) that the
+    /// suffix proves nothing.
+    private static func isUncountable(_ term: String) -> Bool {
+        let last = term.split(separator: " ").last.map(String.init) ?? term
+        guard last.count > 4, !countableWords.contains(last) else { return false }
+        for suffix in ["ing", "ness", "ism", "ity", "ics", "ency", "ance"]
+        where last.hasSuffix(suffix) {
+            return true
+        }
+        return uncountableWords.contains(last)
+    }
+
+    /// Whether the term is already plural, so the question should say "what
+    /// are" rather than fitting it with an article.
+    ///
+    /// English plurals are a swamp; this only has to be right about the shapes
+    /// that appear in a term list. Words ending in -ss, -us, -is and -ics are
+    /// singular despite the s, and a short word ending in s usually isn't a
+    /// plural of anything worth asking about.
+    static func isPlural(_ term: String) -> Bool {
+        let last = (term.split(separator: " ").last.map(String.init) ?? term).lowercased()
+        guard last.count > 3, last.hasSuffix("s") else { return false }
+        for ending in ["ss", "us", "is", "ics", "ous"] where last.hasSuffix(ending) {
+            return false
+        }
+        return true
+    }
+
+    /// Nouns that only look like the suffix rules — a string is a thing you can
+    /// have two of, whatever its ending suggests.
+    private static let countableWords: Set<String> = [
+        "string", "thing", "setting", "meaning", "mapping", "binding",
+        "building", "warning", "listing", "reading", "recording", "opening",
+        "entity", "quantity", "identity", "utility", "activity", "priority",
+        "property", "instance", "variance", "distance", "sequence", "reference",
+    ]
+
+    /// The ones no suffix rule catches, kept short on purpose.
+    private static let uncountableWords: Set<String> = [
+        "data", "software", "hardware", "memory", "storage", "bandwidth",
+        "throughput", "latency", "evidence", "research", "feedback", "context",
+        "syntax", "logic", "math", "recursion", "concurrency", "classification",
+        "regression", "inference", "compression", "encryption", "authentication",
+    ]
 
     // MARK: Regex plumbing
 

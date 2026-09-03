@@ -5,6 +5,9 @@ struct SettingsView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(StudyStore.self) private var study
 
+    /// Non-nil while the feedback share sheet is up; holds the text being sent.
+    @State private var feedback: String?
+
     var body: some View {
         @Bindable var settings = settings
 
@@ -188,18 +191,49 @@ struct SettingsView: View {
                     }
                 }
 
+                // Beta: the tester writes one sentence, the app supplies the
+                // rest. Sharing rather than mailing, so they pick where it goes
+                // — and so no address has to be baked into the build.
+                Section {
+                    Button {
+                        Haptics.tap()
+                        feedback = Diagnostics.current(store: store, study: study,
+                                                       settings: settings).shareText
+                    } label: {
+                        Label("Send feedback", systemImage: "exclamationmark.bubble")
+                    }
+                    NavigationLink {
+                        PrivacyView()
+                    } label: {
+                        Label("Privacy", systemImage: "lock.shield")
+                    }
+                } header: {
+                    Text("Beta")
+                } footer: {
+                    Text("Feedback includes your version, device and library size — never your notes, transcripts, answers or key.")
+                }
+
                 Section {
                     LabeledContent("Transcription", value: "Apple Speech · on device")
                     LabeledContent("Recaps saved", value: "\(store.sortedRecordings.count)")
                     LabeledContent("Brains", value: "\(store.visibleBrains.count)")
+                    LabeledContent("Questions", value: "\(study.liveItems.count)")
                     LabeledContent("Version", value: appVersion)
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("CatchMeUp turns a meeting or lecture recording into notes. Audio is transcribed on your iPhone and never uploaded.")
+                    Text("CatchMeUp turns a meeting or lecture recording into notes, then into questions it brings back on a schedule. Audio is transcribed on your iPhone and never uploaded.")
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: Binding(
+                get: { feedback != nil },
+                set: { if !$0 { feedback = nil } }
+            )) {
+                if let feedback {
+                    ShareTextSheet(text: feedback)
+                }
+            }
         }
     }
 

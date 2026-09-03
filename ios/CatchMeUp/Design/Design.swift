@@ -25,6 +25,19 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
+/// The same sheet for plain text. Used by the feedback row, where the point is
+/// that the tester chooses the destination — mail, messages, a bug tracker —
+/// rather than the app deciding who hears about it.
+struct ShareTextSheet: UIViewControllerRepresentable {
+    let text: String
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [text], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
 // MARK: - Card
 
 struct Card<Content: View>: View {

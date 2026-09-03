@@ -21,6 +21,13 @@ struct OnboardingView: View {
              title: "Your audio stays\non this iPhone",
              body: "Transcription runs on device with Apple Speech. Only the text is used to write the notes — and in Demo or On-device mode, nothing leaves your phone at all.",
              tint: .brandDeep),
+        // The pane that says what this app is *for*. Notes are the input; the
+        // product is what happens to them afterwards, and a first-time user who
+        // never learns that just has another transcription app.
+        Pane(symbol: "brain.head.profile",
+             title: "Then it asks you\nabout them",
+             body: "Every recap becomes questions. You get them back on the day you're about to forget — a few minutes, not a cram session. Reading feels like learning; being asked is learning.",
+             tint: .mint),
         Pane(symbol: "sparkles",
              title: "Pick who writes\nthe notes",
              body: "Start in Demo mode to look around. Later, switch to Apple's on-device model (free) or paste an API key from Anthropic, OpenAI, Gemini, and more.",

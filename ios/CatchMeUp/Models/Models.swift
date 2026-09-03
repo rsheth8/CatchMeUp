@@ -178,6 +178,8 @@ struct Recording: Codable, Identifiable, Hashable {
     var recap: Recap?
     var brainID: UUID?
     var processingError: String?
+    /// Indices of `recap.actionItems` the user has ticked off.
+    var completedActions: [Int] = []
 
     var displayTitle: String {
         if let t = recap?.title, !t.isEmpty { return t }
@@ -185,6 +187,21 @@ struct Recording: Codable, Identifiable, Hashable {
     }
 
     var isProcessed: Bool { recap != nil }
+
+    var needsAttention: Bool { processingError != nil && recap == nil }
+
+    /// Everything worth matching against in the library search field.
+    var searchBlob: String {
+        var parts = [displayTitle, mode.title]
+        if let r = recap {
+            parts += r.tldr ?? []
+            parts += r.actionItems ?? []
+            parts += (r.detailedNotes ?? []).flatMap { [$0.heading, $0.content] }
+            parts += (r.bookmarks ?? []).flatMap { [$0.heading, $0.insight] }
+            parts += (r.terms ?? []).flatMap { [$0.term, $0.definition] }
+        }
+        return parts.joined(separator: " ")
+    }
 
     init(id: UUID = UUID(), title: String, createdAt: Date = Date(), mode: Mode,
          audioFilename: String? = nil, duration: Double = 0, segments: [Segment] = [],
@@ -196,7 +213,7 @@ struct Recording: Codable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, deleted, mode, audioFilename
-        case duration, segments, recap, brainID, processingError
+        case duration, segments, recap, brainID, processingError, completedActions
     }
 
     init(from d: Decoder) throws {
@@ -213,6 +230,7 @@ struct Recording: Codable, Identifiable, Hashable {
         recap = try c.decodeIfPresent(Recap.self, forKey: .recap)
         brainID = try c.decodeIfPresent(UUID.self, forKey: .brainID)
         processingError = try c.decodeIfPresent(String.self, forKey: .processingError)
+        completedActions = try c.decodeIfPresent([Int].self, forKey: .completedActions) ?? []
     }
 }
 

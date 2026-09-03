@@ -124,6 +124,28 @@ final class LibraryStore {
         saveRecordings()
     }
 
+    /// Renames a recap. The model-written title wins in the UI, so set both.
+    func rename(_ recordingID: UUID, to newTitle: String) {
+        let name = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
+        recordings[i].title = name
+        if recordings[i].recap != nil { recordings[i].recap?.title = name }
+        recordings[i].updatedAt = Date()
+        saveRecordings()
+    }
+
+    /// Ticks an action item off (or back on).
+    func toggleAction(_ recordingID: UUID, index: Int) {
+        guard let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
+        if let at = recordings[i].completedActions.firstIndex(of: index) {
+            recordings[i].completedActions.remove(at: at)
+        } else {
+            recordings[i].completedActions.append(index)
+        }
+        recordings[i].updatedAt = Date()
+        saveRecordings()
+    }
+
     func assign(_ recordingID: UUID, toBrain brainID: UUID?) {
         guard let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
         recordings[i].brainID = brainID
@@ -165,8 +187,16 @@ final class LibraryStore {
 
     // MARK: - Persistence
 
-    private func load() {
+    /// Must match `write` — the encoder emits ISO-8601 dates, so the decoder
+    /// has to be told to read them that way or every load fails silently.
+    private static func makeDecoder() -> JSONDecoder {
         let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        return dec
+    }
+
+    private func load() {
+        let dec = Self.makeDecoder()
         if let d = coordinatedRead(recordingsFile), let r = try? dec.decode([Recording].self, from: d) {
             recordings = r
         }
@@ -201,7 +231,7 @@ final class LibraryStore {
     // MARK: - Merge (called when iCloud reports a change)
 
     func mergeFromDisk() {
-        let dec = JSONDecoder()
+        let dec = Self.makeDecoder()
         var changed = false
 
         if let d = coordinatedRead(recordingsFile),

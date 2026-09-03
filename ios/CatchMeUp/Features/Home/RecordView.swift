@@ -17,12 +17,15 @@ struct RecordView: View {
     @State private var startError: String?
     @State private var didStart = false
     @State private var confirmDiscard = false
+    @State private var sessionID: UUID
+    @State private var preparing = false
 
-    init(initialMode: Mode, brainID: UUID? = nil, onFinish: @escaping (UUID) -> Void) {
+    init(initialMode: Mode, brainID: UUID? = nil, recordingID: UUID? = nil, onFinish: @escaping (UUID) -> Void) {
         self.initialMode = initialMode
         self.brainID = brainID
         self.onFinish = onFinish
         _mode = State(initialValue: initialMode)
+        _sessionID = State(initialValue: recordingID ?? UUID())
     }
 
     var body: some View {
@@ -31,6 +34,17 @@ struct RecordView: View {
 
             VStack(spacing: 0) {
                 topBar
+                if mode == .meeting, !recorder.isRecording {
+                    Button {
+                        if store.recording(sessionID) == nil {
+                            var draft = Recording(id: sessionID, title: "Meeting preparation", mode: .meeting, brainID: brainID)
+                            draft.meeting = MeetingWorkspace()
+                            store.upsert(draft)
+                        }
+                        preparing = true
+                    } label: { Label("Agenda, materials & preparation", systemImage: "list.bullet.clipboard") }
+                        .font(.subheadline).padding(.top, 18)
+                }
                 Spacer()
                 timer
                 waveform
@@ -48,6 +62,7 @@ struct RecordView: View {
             permissionDenied = !granted
         }
         .onDisappear { if recorder.isRecording { recorder.stop() } }
+        .sheet(isPresented: $preparing) { MeetingPreparationSheet(recordingID: sessionID) }
         .alert("Discard this recording?", isPresented: $confirmDiscard) {
             Button("Keep recording", role: .cancel) { }
             // "The audio won't be saved" has to be true on disk as well as in
@@ -276,11 +291,15 @@ struct RecordView: View {
         // Nothing usable was captured (e.g. stopped while the mic was still
         // spinning up) — don't leave an empty recap behind.
         guard let url, elapsed > 0.4 else { dismiss(); return }
-        let rec = Recording(title: "\(mode.title) · \(Date().formatted(date: .abbreviated, time: .shortened))",
+        var rec = store.recording(sessionID) ?? Recording(id: sessionID, title: "\(mode.title) · \(Date().formatted(date: .abbreviated, time: .shortened))",
                             mode: mode,
                             audioFilename: url.lastPathComponent,
                             duration: elapsed,
                             brainID: brainID)
+        rec.mode = mode
+        rec.createdAt = .now
+        rec.audioFilename = url.lastPathComponent
+        rec.duration = elapsed
         store.upsert(rec)
         onFinish(rec.id)
 

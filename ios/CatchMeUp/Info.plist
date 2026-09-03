@@ -37,6 +37,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>CatchMeUp records audio so it can turn a meeting or lecture into notes.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>CatchMeUp uses the camera when you choose to scan supplemental material into a brain.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>CatchMeUp adds the follow-ups you choose to your Apple Reminders list.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -83,22 +83,23 @@ enum Prompts {
     - Prefer short bullets over long paragraphs, and bold the term each bullet is about.
     - Put code in a fenced block with its language. Keep formulas as plain text, not LaTeX.
     - Aim for under 250 words unless a plan or list was asked for.
-    - Finish with one last line, exactly: `Sources: <recap title>, <recap title>`
+    - Finish with one last line beginning `Sources:`. Copy recording titles exactly. For a \
+      provided material, append the strongest location as `[Page 4]` or `[Slide 12]`.
     """
 
-    /// `sources` are the exact recap titles that made it into the context.
+    /// `sources` are the exact recap and material titles that made it into the context.
     /// Naming them explicitly is what makes the trailing `Sources:` line worth
     /// anything — without it the model cites whatever title it half-remembers,
     /// and a citation nobody can check is worse than none.
     static func askPrompt(
         question: String, persona: String, context: String, sources: [String] = []
     ) -> String {
-        let voice = persona.isEmpty ? "You answer questions about a set of recap notes." : persona
+        let voice = persona.isEmpty ? "You answer questions about recordings and their supporting materials." : persona
         let sourceRule = sources.isEmpty
             ? ""
             : """
 
-            The notes below are excerpts from these recaps, and these are the only \
+            The context below is excerpted from recordings and provided materials. These are the only \
             titles you may put in the Sources line — copy them exactly:
             \(sources.map { "- \($0)" }.joined(separator: "\n"))
             """
@@ -106,16 +107,18 @@ enum Prompts {
         return """
         \(voice)
 
-        Answer the question using ONLY the notes below. If the notes don't cover it, say so \
+        Answer the question using ONLY the context below. If it doesn't cover the answer, say so \
         plainly rather than filling the gap from general knowledge. Lines beginning \
-        "Said [00:00:00]" are direct transcript quotes and can be quoted back.
+        "Said [00:00:00]" come from transcripts. Lines marked Page or Slide come from \
+        provided material. Never claim provided material was said aloud. When comparing the \
+        two, clearly distinguish what was said, what was supplied, and what you inferred.
         \(sourceRule)
 
         \(answerFormat)
 
-        --- NOTES ---
+        --- CONTEXT ---
         \(context)
-        --- END NOTES ---
+        --- END CONTEXT ---
 
         Question: \(question)
         """

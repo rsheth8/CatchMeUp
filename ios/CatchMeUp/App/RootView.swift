@@ -36,13 +36,15 @@ struct RootView: View {
             }
             .fullScreenCover(isPresented: Binding(
                 get: { router.recorderMode != nil },
-                set: { if !$0 { router.recorderMode = nil; router.recorderBrainID = nil } }
+                set: { if !$0 { router.recorderMode = nil; router.recorderBrainID = nil; router.recorderRecordingID = nil } }
             )) {
                 if let mode = router.recorderMode {
-                    RecordView(initialMode: mode, brainID: router.recorderBrainID) { newID in
+                    RecordView(initialMode: mode, brainID: router.recorderBrainID,
+                               recordingID: router.recorderRecordingID) { newID in
                         let brainID = router.recorderBrainID
                         router.recorderMode = nil
                         router.recorderBrainID = nil
+                        router.recorderRecordingID = nil
                         if let brainID {
                             router.selectedTab = .brains
                             router.brainPath = [brainID, newID]
@@ -66,95 +68,24 @@ struct RootView: View {
         }
     }
 
-    /// The system bar stays in the layout and is only made invisible, with the
-    /// pill drawn over it.
-    ///
-    /// Hiding it outright and re-inseting the pill was the obvious approach and
-    /// it doesn't work: every screen that already floats something above the tab
-    /// bar — Recaps' record button, the grade buttons in a review — measures its
-    /// own bottom inset against the tab bar, so removing it drops those controls
-    /// behind the pill. Keeping the bar means none of that layout has to change.
     private var tabs: some View {
         TabView(selection: Bindable(router).selectedTab) {
-            room(LibraryView())
+            LibraryView()
                 .tabItem { Label("Recaps", systemImage: "waveform") }
                 .tag(AppTab.library)
 
-            room(StudyView())
+            StudyView()
                 .tabItem { Label("Study", systemImage: "graduationcap") }
                 .tag(AppTab.study)
                 .badge(dueBadge)
 
-            room(BrainsView())
+            BrainsView()
                 .tabItem { Label("Brains", systemImage: "brain") }
                 .tag(AppTab.brains)
 
-            room(SettingsView())
+            SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
-        .overlay(alignment: .bottom) {
-            if sizeClass == .compact {
-                FloatingTabBar(selection: Bindable(router).selectedTab,
-                               studyBadge: dueBadge)
-            }
-        }
-        .onAppear { if sizeClass == .compact { UITabBar.makeInvisible() } }
-    }
-
-    /// Gives a screen back the room a transparent tab bar stops reserving, so
-    /// the last row of a list isn't left sitting under the pill.
-    @ViewBuilder
-    private func room(_ content: some View) -> some View {
-        if sizeClass == .compact {
-            content.safeAreaPadding(.bottom, FloatingTabBar.reservedHeight)
-        } else {
-            content
-        }
-    }
-}
-
-// MARK: - Hiding the system bar without removing it
-
-private extension UITabBar {
-    /// Clears the bar's background and paints its items in clear, so it still
-    /// occupies its space — and still supplies every screen's bottom safe area —
-    /// while the pill above it is the only thing anyone sees.
-    @MainActor
-    static func makeInvisible() {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundColor = .clear
-        appearance.shadowColor = .clear
-
-        for item in [appearance.stackedLayoutAppearance,
-                     appearance.inlineLayoutAppearance,
-                     appearance.compactInlineLayoutAppearance] {
-            for state in [item.normal, item.selected] {
-                state.iconColor = .clear
-                state.titleTextAttributes = [.foregroundColor: UIColor.clear]
-                // The badge would otherwise float over the pill on its own.
-                state.badgeBackgroundColor = .clear
-                state.badgeTextAttributes = [.foregroundColor: UIColor.clear]
-            }
-        }
-
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
-        // Appearance proxies only take on bars created afterwards; existing ones
-        // need it applied directly.
-        for window in UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
-            window.allTabBars.forEach {
-                $0.standardAppearance = appearance
-                $0.scrollEdgeAppearance = appearance
-            }
-        }
-    }
-}
-
-private extension UIView {
-    var allTabBars: [UITabBar] {
-        (self as? UITabBar).map { [$0] } ?? subviews.flatMap(\.allTabBars)
     }
 }

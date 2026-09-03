@@ -162,6 +162,8 @@ struct RecapDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 hero(rec)
 
+                if rec.mode != .meeting { RecapMaterialsCard(recording: rec) }
+
                 if let job = queue.job(for: recordingID) {
                     ProcessingCard(job: job, tint: rec.mode.accent) {
                         queue.cancel(recordingID)
@@ -173,11 +175,12 @@ struct RecapDetailView: View {
                     errorCard(err)
                 }
 
-                if let recap = rec.recap {
-                    recapBody(rec, recap)
+                if rec.mode == .meeting {
+                    MeetingWorkspaceView(recordingID: rec.id) { play(from: $0) }
+                } else {
+                    if let recap = rec.recap { recapBody(rec, recap) }
+                    practiceCard(rec)
                 }
-
-                practiceCard(rec)
 
                 if !rec.segments.isEmpty { transcriptButton(rec) }
             }
@@ -502,6 +505,7 @@ struct RecapDetailView: View {
     private func offerPrequestions() {
         guard settings.prequestions,
               let rec = recording,
+              rec.mode == .lecture,
               rec.isProcessed,
               !rec.pretestSpent,
               prequestions.isEmpty else { return }

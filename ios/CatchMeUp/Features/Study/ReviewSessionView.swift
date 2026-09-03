@@ -118,7 +118,7 @@ struct ReviewSessionView: View {
             MarkdownText(item.prompt, style: promptStyle)
 
             if !item.sourceTitle.isEmpty {
-                Label(item.sourceTitle, systemImage: "waveform")
+                Label(item.sourceTitle, systemImage: item.materialID == nil ? "waveform" : "doc.richtext")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)

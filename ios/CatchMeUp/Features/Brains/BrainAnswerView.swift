@@ -9,9 +9,11 @@ import UIKit
 /// Splits a model answer into renderable prose and the recaps it cited.
 struct BrainAnswer {
     let prose: String
-    let sourceIDs: [UUID]
+    let recapIDs: [UUID]
+    let materialIDs: [UUID]
+    let materialPages: [UUID: Int]
 
-    init(raw: String, recaps: [Recording]) {
+    init(raw: String, recaps: [Recording], materials: [SupplementalMaterial] = []) {
         var lines = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: "\n")
@@ -32,17 +34,29 @@ struct BrainAnswer {
         let prose = lines.joined(separator: "\n")
         self.prose = prose
 
-        var ids: [UUID] = []
+        var recapIDs: [UUID] = []
+        var materialIDs: [UUID] = []
+        var materialPages: [UUID: Int] = [:]
         for name in named {
-            if let id = Self.match(name, in: recaps), !ids.contains(id) { ids.append(id) }
-        }
-        // No usable list? Fall back to any recap title mentioned in the answer.
-        if ids.isEmpty {
-            for recap in recaps where prose.localizedCaseInsensitiveContains(recap.displayTitle) {
-                ids.append(recap.id)
+            if let id = Self.matchRecording(name, in: recaps), !recapIDs.contains(id) {
+                recapIDs.append(id)
+            } else if let id = Self.matchMaterial(name, in: materials), !materialIDs.contains(id) {
+                materialIDs.append(id)
+                if let page = Self.location(in: name) { materialPages[id] = page }
             }
         }
-        self.sourceIDs = ids
+        // No usable list? Fall back to any source title mentioned in the answer.
+        if recapIDs.isEmpty && materialIDs.isEmpty {
+            for recap in recaps where prose.localizedCaseInsensitiveContains(recap.displayTitle) {
+                recapIDs.append(recap.id)
+            }
+            for material in materials where prose.localizedCaseInsensitiveContains(material.name) {
+                materialIDs.append(material.id)
+            }
+        }
+        self.recapIDs = recapIDs
+        self.materialIDs = materialIDs
+        self.materialPages = materialPages
     }
 
     private static func isSourceLine(_ line: String) -> Bool {
@@ -62,7 +76,7 @@ struct BrainAnswer {
     }
 
     /// Titles get paraphrased, so compare on letters and digits only.
-    private static func match(_ name: String, in recaps: [Recording]) -> UUID? {
+    private static func matchRecording(_ name: String, in recaps: [Recording]) -> UUID? {
         let key = normalized(name)
         guard key.count >= 4 else { return nil }
         if let exact = recaps.first(where: { normalized($0.displayTitle) == key }) { return exact.id }
@@ -70,6 +84,27 @@ struct BrainAnswer {
             let title = normalized(recap.displayTitle)
             return title.contains(key) || key.contains(title)
         }?.id
+    }
+
+    private static func matchMaterial(_ name: String, in materials: [SupplementalMaterial]) -> UUID? {
+        let withoutLocation = name.replacingOccurrences(
+            of: #"(?i)\s*[\[(]?(?:page|slide)\s+\d+[\])]?\s*$"#,
+            with: "", options: .regularExpression
+        )
+        let key = normalized(withoutLocation)
+        guard key.count >= 4 else { return nil }
+        if let exact = materials.first(where: { normalized($0.name) == key }) { return exact.id }
+        return materials.first { material in
+            let title = normalized(material.name)
+            return title.contains(key) || key.contains(title)
+        }?.id
+    }
+
+    private static func location(in name: String) -> Int? {
+        guard let range = name.range(of: #"(?i)(?:page|slide)\s+(\d+)"#,
+                                     options: .regularExpression) else { return nil }
+        let matched = String(name[range])
+        return Int(matched.split(whereSeparator: { !$0.isNumber }).joined())
     }
 
     private static func normalized(_ text: String) -> String {
@@ -106,24 +141,32 @@ struct BrainAnswerCard: View {
     /// Only the recaps retrieval sent to the model, so a chip always points at
     /// something the answer could actually have come from.
     let recaps: [Recording]
+    let materials: [SupplementalMaterial]
     let clipped: Bool
     let onRetry: () -> Void
 
     @State private var copied = false
+    @State private var selectedMaterial: SupplementalMaterial?
+    @State private var selectedMaterialPage: Int?
 
     private let answer: BrainAnswer
     private let sources: [Recording]
+    private let materialSources: [SupplementalMaterial]
+    private let materialPages: [UUID: Int]
 
-    init(raw: String, tint: Color, recaps: [Recording],
+    init(raw: String, tint: Color, recaps: [Recording], materials: [SupplementalMaterial] = [],
          clipped: Bool = false, onRetry: @escaping () -> Void) {
-        let parsed = BrainAnswer(raw: raw, recaps: recaps)
+        let parsed = BrainAnswer(raw: raw, recaps: recaps, materials: materials)
         self.raw = raw
         self.tint = tint
         self.recaps = recaps
+        self.materials = materials
         self.clipped = clipped
         self.onRetry = onRetry
         self.answer = parsed
-        self.sources = parsed.sourceIDs.compactMap { id in recaps.first { $0.id == id } }
+        self.sources = parsed.recapIDs.compactMap { id in recaps.first { $0.id == id } }
+        self.materialSources = parsed.materialIDs.compactMap { id in materials.first { $0.id == id } }
+        self.materialPages = parsed.materialPages
     }
 
     var body: some View {
@@ -131,7 +174,7 @@ struct BrainAnswerCard: View {
             VStack(alignment: .leading, spacing: 15) {
                 MarkdownText(answer.prose, style: style)
 
-                if !sources.isEmpty {
+                if !sources.isEmpty || !materialSources.isEmpty {
                     Divider().opacity(0.4)
                     sourceChips
                 }
@@ -140,6 +183,10 @@ struct BrainAnswerCard: View {
 
                 actions
             }
+        }
+        .sheet(item: $selectedMaterial) { material in
+            MaterialDetailView(materialID: material.id, tint: tint,
+                               initialPage: selectedMaterialPage)
         }
     }
 
@@ -163,7 +210,7 @@ struct BrainAnswerCard: View {
 
     private var sourceChips: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("From \(sources.count) recap\(sources.count == 1 ? "" : "s")")
+            Text("From \(sources.count + materialSources.count) source\(sources.count + materialSources.count == 1 ? "" : "s")")
                 .font(.caption2.weight(.bold))
                 .tracking(0.6)
                 .foregroundStyle(.tertiary)
@@ -176,6 +223,29 @@ struct BrainAnswerCard: View {
                                 Image(systemName: recap.mode.symbol)
                                     .font(.caption2.weight(.bold))
                                 Text(recap.displayTitle)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: 190, alignment: .leading)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(tint)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(tint.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(materialSources) { material in
+                        Button {
+                            selectedMaterialPage = materialPages[material.id]
+                            selectedMaterial = material
+                            Haptics.tap()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: material.kind.symbol)
+                                    .font(.caption2.weight(.bold))
+                                Text(material.name + (materialPages[material.id].map {
+                                    " · \(material.kind == .slides ? "Slide" : "Page") \($0)"
+                                } ?? ""))
                                     .lineLimit(1)
                                     .frame(maxWidth: 190, alignment: .leading)
                             }

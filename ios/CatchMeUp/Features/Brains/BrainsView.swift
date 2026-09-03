@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BrainsView: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(MaterialStore.self) private var materials
     @Environment(AppRouter.self) private var router
     @State private var showNew = false
     @State private var newName = ""
@@ -81,7 +82,9 @@ struct BrainsView: View {
 
     private func brainCard(_ brain: Brain) -> some View {
         NavigationLink(value: brain.id) {
-            BrainCard(brain: brain, count: store.recordings(inBrain: brain.id).count)
+            BrainCard(brain: brain,
+                      recapCount: store.recordings(inBrain: brain.id).count,
+                      materialCount: materials.materials(inBrain: brain.id).count)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -133,7 +136,8 @@ struct BrainsView: View {
 
 struct BrainCard: View {
     let brain: Brain
-    let count: Int
+    let recapCount: Int
+    let materialCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -144,7 +148,7 @@ struct BrainCard: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text("\(count) recap\(count == 1 ? "" : "s")")
+                Text(sourceCount)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -163,6 +167,12 @@ struct BrainCard: View {
                 .shadow(color: .black.opacity(0.05), radius: 9, y: 4)
         }
     }
+
+    private var sourceCount: String {
+        let recaps = "\(recapCount) recap\(recapCount == 1 ? "" : "s")"
+        guard materialCount > 0 else { return recaps }
+        return "\(recaps) · \(materialCount) material\(materialCount == 1 ? "" : "s")"
+    }
 }
 
 // MARK: - Detail
@@ -175,6 +185,7 @@ struct BrainDetailView: View {
     @Environment(ProcessingQueue.self) private var queue
     @Environment(AppRouter.self) private var router
     @Environment(StudyStore.self) private var study
+    @Environment(MaterialStore.self) private var materials
 
     @State private var question = ""
     @State private var thread: [QAExchange] = []
@@ -194,6 +205,7 @@ struct BrainDetailView: View {
         /// are matched against these rather than the whole brain, so a chip
         /// can't point at a recap the model never read.
         var sources: [Recording] = []
+        var materialSources: [SupplementalMaterial] = []
         /// The brain held more matching material than the context budget fit.
         var clipped = false
     }
@@ -207,8 +219,15 @@ struct BrainDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if let brain {
                         personaCard(brain)
+                        BrainKnowledgeCard(brainID: brain.id, tint: brain.mode.accent)
                         neuralMapCard(brain)
-                        studyTools(brain)
+                        if brain.mode == .meeting {
+                            MeetingPreparationCard(recording: Recording(title: "Next \(brain.name) meeting", mode: .meeting, brainID: brain.id))
+                            Button {
+                                question = "How have decisions changed across these meetings? Distinguish proposals from agreed decisions, include dates and sources, and flag unresolved conflicts."
+                                Task { await ask() }
+                            } label: { Label("Compare decisions across meetings", systemImage: "clock.arrow.circlepath") }
+                        } else { studyTools(brain) }
 
                         if thread.isEmpty {
                             starters(brain)
@@ -323,7 +342,8 @@ struct BrainDetailView: View {
     // MARK: Conversation
 
     private func neuralMapCard(_ brain: Brain) -> some View {
-        let graph = BrainGraph.build(from: store.recordings(inBrain: brainID))
+        let graph = BrainGraph.build(from: store.recordings(inBrain: brainID),
+                                     materials: materials.materials(inBrain: brainID))
         return Button {
             Haptics.tap()
             showGraph = true
@@ -337,7 +357,7 @@ struct BrainDetailView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                     Text(graph.nodes.isEmpty
-                         ? "Add recaps to grow this brain"
+                         ? "Add recordings or material to grow this brain"
                          : "\(graph.nodes.count) concepts · \(graph.edges.count) connections")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -474,7 +494,8 @@ struct BrainDetailView: View {
 
                     if let answer = ex.answer {
                         BrainAnswerCard(raw: answer, tint: accent,
-                                        recaps: ex.sources, clipped: ex.clipped) {
+                                        recaps: ex.sources, materials: ex.materialSources,
+                                        clipped: ex.clipped) {
                             Task { await retry(ex.id) }
                         }
                     } else if let error = ex.error {
@@ -482,7 +503,8 @@ struct BrainDetailView: View {
                             Task { await retry(ex.id) }
                         }
                     } else {
-                        BrainThinkingCard(tint: accent, recapCount: recaps.count)
+                        BrainThinkingCard(tint: accent,
+                                          recapCount: recaps.count + materials.materials(inBrain: brainID).count)
                     }
                 }
                 .id(ex.id)
@@ -526,7 +548,7 @@ struct BrainDetailView: View {
     private var composer: some View {
         FloatingControlShelf(contentPadding: 8) {
             HStack(spacing: 9) {
-                TextField("Ask across these recaps…", text: $question, axis: .vertical)
+                TextField("Ask across this brain…", text: $question, axis: .vertical)
                     .lineLimit(1...4)
                     .font(.subheadline)
                     .padding(.horizontal, 12)
@@ -564,8 +586,8 @@ struct BrainDetailView: View {
     private func ask() async {
         let q = question.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, brain != nil else { return }
-        guard !store.recordings(inBrain: brainID).isEmpty else {
-            askError = "This brain has no recaps yet."
+        guard !store.recordings(inBrain: brainID).isEmpty || !materials.materials(inBrain: brainID).isEmpty else {
+            askError = "This brain has no recordings or material yet."
             Haptics.warning()
             return
         }
@@ -591,6 +613,7 @@ struct BrainDetailView: View {
     private func answer(_ id: UUID) async {
         guard let brain, let asked = thread.first(where: { $0.id == id })?.question else { return }
         let recs = store.recordings(inBrain: brainID)
+        let docs = materials.materials(inBrain: brainID)
 
         asking = true
         defer { asking = false }
@@ -605,17 +628,30 @@ struct BrainDetailView: View {
         // shouldn't freeze while that happens.
         let budget = engine.contextBudget
         let retrieved = await Task.detached(priority: .userInitiated) {
-            BrainRetriever.context(for: asked, recaps: recs, budget: budget)
+            // Reserve room for each source family so one very long transcript
+            // cannot crowd every relevant slide out of the answer (or vice versa).
+            let recapBudget = docs.isEmpty ? budget : Int(Double(budget) * 0.62)
+            let materialBudget = recs.isEmpty ? budget : budget - recapBudget
+            let recapContext = BrainRetriever.context(for: asked, recaps: recs, budget: recapBudget)
+            let materialContext = MaterialRetriever.context(for: asked, materials: docs, budget: materialBudget)
+            return RetrievedContext(
+                text: [recapContext.text, materialContext.text].filter { !$0.isEmpty }.joined(separator: "\n\n"),
+                recaps: recapContext.recaps,
+                materials: materialContext.materials,
+                searchedCount: recapContext.searchedCount + materialContext.searchedCount,
+                clipped: recapContext.clipped || materialContext.clipped
+            )
         }.value
         if let i = thread.firstIndex(where: { $0.id == id }) {
             thread[i].sources = retrieved.recaps
+            thread[i].materialSources = retrieved.materials
             thread[i].clipped = retrieved.clipped
         }
 
         guard !retrieved.isEmpty else {
             guard let i = thread.firstIndex(where: { $0.id == id }) else { return }
             withAnimation(.quick) {
-                thread[i].error = "None of the recaps in this brain have notes yet."
+                thread[i].error = "None of this brain's recordings or materials are ready to search yet."
             }
             Haptics.warning()
             return

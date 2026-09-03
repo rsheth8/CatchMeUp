@@ -97,6 +97,19 @@ final class WeekPulseTests: XCTestCase {
         XCTAssertEqual(lines.first?.text, "Still open")
     }
 
+    func testDuplicateActionsAcrossRecapsAppearOnlyOnce() {
+        let now = Date()
+        var first = Recording(title: "Monday sync", mode: .meeting,
+                              recap: Recap(actionItems: ["Priya: finish the tests by Thursday."]))
+        first.createdAt = now
+        var second = Recording(title: "Tuesday sync", mode: .meeting,
+                               recap: Recap(actionItems: ["PRIYA:  finish the tests by Thursday"]))
+        second.createdAt = now
+
+        let lines = WeekPulse.lines(from: [first, second], now: now)
+        XCTAssertEqual(lines.map(\.text), ["Priya: finish the tests by Thursday."])
+    }
+
     func testOldRecapsDoNotAppear() {
         var rec = Recording(title: "Sync", mode: .meeting, recap: Recap(actionItems: ["Ancient"]))
         rec.createdAt = Date().addingTimeInterval(-8 * 24 * 3600)

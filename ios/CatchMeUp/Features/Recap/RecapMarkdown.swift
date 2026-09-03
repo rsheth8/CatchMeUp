@@ -15,7 +15,16 @@ enum RecapMarkdown {
         list(RecapLayout.gistTitle(for: rec.mode), r.tldr)
 
         if rec.mode == .meeting {
-            list("Action items", r.actionItems)
+            if let workspace = rec.meeting {
+                list("Follow-ups", workspace.followUps.map {
+                    "[\($0.status == .done ? "x" : " ")] \($0.title) — \($0.owner.isEmpty ? "Owner not specified" : $0.owner)\($0.deadlineText.isEmpty ? "" : " · \($0.deadlineText)")\($0.dueDate.map { " · Due " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "")\($0.needsReview ? " (needs review)" : "")"
+                })
+                for kind in MeetingOutcomeKind.allCases {
+                    list(kind.title, workspace.outcomes.filter { $0.kind == kind }.map {
+                        "\($0.text)\($0.reviewed ? "" : " (unreviewed)")\($0.resolved ? " (resolved/superseded)" : "")"
+                    })
+                }
+            } else { list("Action items", r.actionItems) }
         }
 
         if let marks = r.bookmarks, !marks.isEmpty {

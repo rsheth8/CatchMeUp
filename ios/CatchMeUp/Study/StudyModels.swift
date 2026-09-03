@@ -53,6 +53,10 @@ struct StudyItem: Codable, Identifiable, Hashable {
 
     // Provenance
     var recordingID: UUID
+    /// Set when the question came from a PDF or slide deck. `recordingID`
+    /// remains populated for scheduling compatibility and points at an attached
+    /// recap when one exists.
+    var materialID: UUID?
     var brainID: UUID?
     var sourceTitle: String = ""
     /// Seconds into the recording where this was taught, when we know it.
@@ -88,10 +92,11 @@ struct StudyItem: Codable, Identifiable, Hashable {
     /// Answer text with the cloze blank filled back in, for the reveal.
     var revealText: String { answer }
 
-    init(recordingID: UUID, brainID: UUID?, sourceTitle: String, timestamp: Double? = nil,
+    init(recordingID: UUID, materialID: UUID? = nil, brainID: UUID?, sourceTitle: String, timestamp: Double? = nil,
          kind: StudyItemKind, prompt: String, answer: String, keys: [String] = [],
          choices: [String] = [], correctChoice: Int? = nil, concept: String = "") {
         self.recordingID = recordingID
+        self.materialID = materialID
         self.brainID = brainID
         self.sourceTitle = sourceTitle
         self.timestamp = timestamp
@@ -119,7 +124,7 @@ struct StudyItem: Codable, Identifiable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, recordingID, brainID, sourceTitle, timestamp, kind, prompt, answer
+        case id, recordingID, materialID, brainID, sourceTitle, timestamp, kind, prompt, answer
         case keys, choices, correctChoice, concept, memory, suspended
         case createdAt, updatedAt, deleted
     }
@@ -128,6 +133,7 @@ struct StudyItem: Codable, Identifiable, Hashable {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         recordingID = try c.decode(UUID.self, forKey: .recordingID)
+        materialID = try c.decodeIfPresent(UUID.self, forKey: .materialID)
         brainID = try c.decodeIfPresent(UUID.self, forKey: .brainID)
         sourceTitle = try c.decodeIfPresent(String.self, forKey: .sourceTitle) ?? ""
         timestamp = try c.decodeIfPresent(Double.self, forKey: .timestamp)

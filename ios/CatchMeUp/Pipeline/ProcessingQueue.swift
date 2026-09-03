@@ -347,12 +347,14 @@ final class ProcessingQueue {
             job.phaseStartedAt = Date()
         }
         recording.processingError = nil
+
         store.upsert(recording)
         await liveActivity.start(for: recording, phase: rewriteOnly ? .writing(0) : .transcribing(0))
 
         if !rewriteOnly {
             do {
                 recording = try await transcribe(recording)
+                recording.meeting = store.recording(recordingID)?.meeting
                 store.upsert(recording)
             } catch is CancellationError {
                 markParked(recordingID)
@@ -370,10 +372,12 @@ final class ProcessingQueue {
 
         if let latest = store.recording(recordingID) {
             recording.mode = latest.mode
+            recording.meeting = latest.meeting
         }
 
         do {
             recording = try await writeNotes(recording)
+            recording.meeting?.preserveUserChanges(from: store.recording(recordingID)?.meeting)
             store.upsert(recording)
             finish(recordingID, recording)
         } catch is CancellationError {
@@ -441,10 +445,28 @@ final class ProcessingQueue {
             mode: recording.mode
         ) { [weak self] progress in
             Task { @MainActor in
-                self?.noteWritingProgress(recording.id, progress: progress)
+                self?.noteWritingProgress(recording.id, progress: recording.mode == .meeting && engine != .demo ? progress * 0.8 : progress)
             }
         }
         recording.processingError = nil
+
+        if recording.mode == .meeting, engine != .demo {
+            do {
+                let attached = MaterialStore.shared.materials(forRecording: recording.id)
+                recording.meeting = try await recapEngine.meetingWorkspace(for: recording, materials: attached) { [weak self] progress in
+                    Task { @MainActor in self?.noteWritingProgress(recording.id, progress: 0.8 + 0.2 * progress) }
+                }
+                if attached.contains(where: { !$0.state.isReady }) {
+                    recording.meeting?.analysisNotice = "Some attachments were still being read. Refresh meeting insights when they are ready."
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                var workspace = MeetingWorkspace.existing(for: recording)
+                workspace.analysisNotice = "Your recap is saved. Meeting insights need another try: \(error.localizedDescription)"
+                recording.meeting = workspace
+            }
+        }
 
         ProcessingStatsStore.recordWrite(
             characters: transcript.count,

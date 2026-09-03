@@ -145,6 +145,15 @@ final class LibraryStore {
     }
 
     /// Ticks an action item off (or back on).
+    func updateMeeting(_ recordingID: UUID, _ change: (inout MeetingWorkspace) -> Void) {
+        guard let i = recordings.firstIndex(where: { $0.id == recordingID && !$0.deleted }) else { return }
+        var workspace = MeetingWorkspace.existing(for: recordings[i])
+        change(&workspace)
+        recordings[i].meeting = workspace
+        recordings[i].updatedAt = .now
+        saveRecordings()
+    }
+
     func toggleAction(_ recordingID: UUID, index: Int) {
         guard let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
         if let at = recordings[i].completedActions.firstIndex(of: index) {

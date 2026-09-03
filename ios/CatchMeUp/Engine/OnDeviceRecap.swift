@@ -86,6 +86,52 @@ struct GeneratedMeetingRecap {
 // MARK: - Lecture
 
 @available(iOS 26.0, *)
+@Generable
+struct GeneratedFollowUp {
+    var task: String
+    @Guide(description: "Named owner only if stated. Otherwise empty.") var owner: String
+    @Guide(description: "Deadline exactly as spoken, otherwise empty.") var deadline: String
+    @Guide(description: "Exact HH:MM:SS copied from a transcript timestamp.") var timestamp: String
+    @Guide(description: "A short verbatim transcript quote supporting this task.") var evidence: String
+}
+
+@available(iOS 26.0, *)
+@Generable
+struct GeneratedOutcome {
+    @Guide(description: "Exactly one of: decision, proposal, blocker, question. Agreement is required for decision.")
+    var kind: String
+    var text: String
+    var timestamp: String
+    @Guide(description: "A short verbatim transcript quote supporting this outcome.") var evidence: String
+}
+
+@available(iOS 26.0, *)
+@Generable
+struct GeneratedDocumentContext {
+    @Guide(description: "The exact materialID UUID supplied in a document label.") var materialID: String
+    var page: Int
+    @Guide(description: "Relevant document context, never a claim that this was said aloud.") var summary: String
+}
+
+@available(iOS 26.0, *)
+@Generable
+struct GeneratedMeetingAnalysis {
+    @Guide(.maximumCount(6)) var actions: [GeneratedFollowUp]
+    @Guide(.maximumCount(6)) var outcomes: [GeneratedOutcome]
+    @Guide(.maximumCount(2)) var context: [GeneratedDocumentContext]
+
+    var extraction: MeetingExtraction {
+        MeetingExtraction(actions: actions.map {
+            .init(task: $0.task, owner: $0.owner, deadline: $0.deadline, timestamp: $0.timestamp, evidence: $0.evidence)
+        }, outcomes: outcomes.map {
+            .init(kind: $0.kind, text: $0.text, timestamp: $0.timestamp, evidence: $0.evidence)
+        }, context: context.map {
+            .init(materialID: $0.materialID, page: $0.page, summary: $0.summary)
+        })
+    }
+}
+
+@available(iOS 26.0, *)
 @Generable(description: "A term, formula or name worth remembering, with its meaning.")
 struct GeneratedTerm {
     @Guide(description: "The term, formula or name.")

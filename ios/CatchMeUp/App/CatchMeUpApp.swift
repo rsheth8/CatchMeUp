@@ -15,6 +15,9 @@ struct CatchMeUpApp: App {
     /// The question bank and schedule. Separate from `LibraryStore` because it
     /// outlives any one recap and syncs on its own files.
     @State private var study = StudyStore.shared
+    /// Supplemental PDFs and slide decks live independently from recordings,
+    /// but feed the same brains and retrieval path.
+    @State private var materials = MaterialStore.shared
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -27,6 +30,7 @@ struct CatchMeUpApp: App {
                 .environment(optimizer)
                 .environment(queue)
                 .environment(study)
+                .environment(materials)
                 .fontDesign(.rounded)
                 .tint(.brand)
                 .task { await houseKeeping() }
@@ -68,6 +72,8 @@ struct CatchMeUpApp: App {
         // so the Study tab's badge is right on the first frame the user sees.
         study.mergeFromDisk()
         study.mintOffline(for: store.sortedRecordings)
+        study.mintOffline(for: materials.visibleMaterials)
+        materials.resumePending()
         StudyNotifier.reschedule(study: study, settings: settings)
         if settings.audioRetention.isAutomatic {
             store.applyRetention(settings.audioRetention,
@@ -76,5 +82,25 @@ struct CatchMeUpApp: App {
         if store.syncEnabled, settings.optimizeCloudStorage {
             store.freeSpaceForOlderCloudAudio()
         }
+
+        #if DEBUG
+        // A launch route for simulator/UI validation. It is compiled out of
+        // release builds and never changes a person's library.
+        if ProcessInfo.processInfo.arguments.contains("-showKnowledge"),
+           let brain = store.visibleBrains.first {
+            router.selectedTab = .brains
+            router.brainPath = [brain.id]
+            // UIKit may restore a sheet snapshot before SwiftUI has rebuilt its
+            // navigation state. Clear only that presentation for this explicit
+            // simulator showcase route.
+            try? await Task.sleep(for: .milliseconds(500))
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?
+                .rootViewController?
+                .dismiss(animated: false)
+        }
+        #endif
     }
 }

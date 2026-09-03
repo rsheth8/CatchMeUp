@@ -104,12 +104,25 @@ enum WeekPulse {
         let recent = recordings.filter { $0.createdAt >= weekAgo && $0.recap != nil }
 
         var out: [Line] = []
+        var seenText: Set<String> = []
         for rec in recent {
+            if let workspace = rec.meeting {
+                func label(_ item: MeetingFollowUp) -> String { item.owner.isEmpty ? item.title : "\(item.owner): \(item.title)" }
+                if let item = workspace.followUps.first(where: { $0.status != .done && !seenText.contains(normalized(label($0))) }) {
+                    out.append(Line(id: rec.id, recordingID: rec.id, text: label(item), symbol: "checklist"))
+                    seenText.insert(normalized(label(item)))
+                }
+                if out.count >= limit { return out }
+                continue
+            }
             guard let items = rec.recap?.actionItems, !items.isEmpty else { continue }
-            if let (idx, item) = items.enumerated().first(where: { !rec.completedActions.contains($0.offset) }) {
+            if let (_, item) = items.enumerated().first(where: { candidate in
+                !rec.completedActions.contains(candidate.offset)
+                    && !seenText.contains(normalized(candidate.element))
+            }) {
                 out.append(Line(id: rec.id, recordingID: rec.id,
                                 text: item, symbol: "checklist"))
-                _ = idx
+                seenText.insert(normalized(item))
             }
             if out.count >= limit { return out }
         }
@@ -117,11 +130,22 @@ enum WeekPulse {
             for rec in recent {
                 guard let study = rec.recap?.study, let first = study.first else { continue }
                 if out.contains(where: { $0.recordingID == rec.id }) { continue }
+                guard !seenText.contains(normalized(first)) else { continue }
                 out.append(Line(id: rec.id, recordingID: rec.id,
                                 text: first, symbol: "checkmark.circle"))
+                seenText.insert(normalized(first))
                 if out.count >= limit { break }
             }
         }
         return Array(out.prefix(limit))
+    }
+
+    /// Treat punctuation, capitalization and repeated whitespace as display
+    /// differences, not as separate commitments.
+    private static func normalized(_ text: String) -> String {
+        text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }

@@ -490,6 +490,29 @@ final class StudyStore: StudyItemSink {
         return minted.count
     }
 
+    /// Adds grounded questions from PDFs and slides. Material provenance stays
+    /// on every item so the UI never presents supplied material as something
+    /// heard in a recording.
+    @discardableResult
+    func mintOffline(for materials: [SupplementalMaterial]) -> Int {
+        let covered = Set(liveItems.compactMap(\.materialID))
+        let pending = materials.filter { $0.state.isReady && !covered.contains($0.id) }
+        let minted = pending.flatMap { QuestionMint.items(for: $0) }
+        let before = liveItems.count
+        add(minted)
+        return liveItems.count - before
+    }
+
+    func deleteItems(forMaterial id: UUID) {
+        var changed = false
+        for index in items.indices where items[index].materialID == id && !items[index].deleted {
+            items[index].deleted = true
+            items[index].updatedAt = .now
+            changed = true
+        }
+        if changed { saveItems() }
+    }
+
     /// Rebuilds one recap's questions against the notes it has *now*.
     ///
     /// Called when the processing queue finishes a recording — first pass or a

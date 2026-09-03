@@ -14,12 +14,24 @@ struct RetrievedContext: Sendable {
     /// Recaps that contributed at least one passage — the only titles the model
     /// is allowed to cite.
     let recaps: [Recording]
+    /// PDFs and slide decks that contributed one or more pages.
+    let materials: [SupplementalMaterial]
     /// How many recaps were searched, so the UI can be honest about coverage.
     let searchedCount: Int
     /// True when the budget stopped us short of everything that matched.
     let clipped: Bool
 
     var isEmpty: Bool { text.isEmpty }
+    var sourceTitles: [String] { recaps.map(\.displayTitle) + materials.map(\.name) }
+
+    init(text: String, recaps: [Recording], materials: [SupplementalMaterial] = [],
+         searchedCount: Int, clipped: Bool) {
+        self.text = text
+        self.recaps = recaps
+        self.materials = materials
+        self.searchedCount = searchedCount
+        self.clipped = clipped
+    }
 }
 
 enum BrainRetriever {
@@ -112,11 +124,22 @@ enum BrainRetriever {
             for term in recap.terms ?? [] {
                 add(.term, "Term — \(term.term)", term.definition)
             }
-            for item in recap.actionItems ?? [] {
-                add(.action, "Follow-up", item)
+            if recording.meeting == nil {
+                for item in recap.actionItems ?? [] { add(.action, "Follow-up", item) }
             }
             for mark in recap.bookmarks ?? [] {
                 add(.moment, "Moment [\(mark.timestamp)] \(mark.heading)", mark.insight)
+            }
+        }
+
+        if let workspace = recording.meeting {
+            for task in workspace.followUps {
+                add(.action, "Follow-up · \(task.status.title)\(task.needsReview ? " · unreviewed" : " · reviewed")",
+                    "\(task.title) Owner: \(task.owner). Deadline as stated: \(task.deadlineText). Confirmed due date: \(task.dueDate?.formatted(date: .abbreviated, time: .omitted) ?? "not set"). \(task.evidence)")
+            }
+            for outcome in workspace.outcomes {
+                add(.note, "\(outcome.kind.title) · \(outcome.reviewed ? "reviewed" : "unreviewed")\(outcome.resolved ? " · resolved/superseded" : "")",
+                    "\(outcome.text) Evidence [\(outcome.timestamp)]: \(outcome.evidence)")
             }
         }
 

@@ -6,6 +6,11 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.19
+
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -29,6 +34,7 @@ targets:
     dependencies:
       - target: CatchMeUpWidgets
         embed: true
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app

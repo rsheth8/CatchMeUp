@@ -224,6 +224,9 @@ struct Recording: Codable, Identifiable, Hashable {
     var processingError: String?
     /// Indices of `recap.actionItems` the user has ticked off.
     var completedActions: [Int] = []
+    /// Meeting-specific preparation and reviewed follow-ups. Separate from
+    /// generated notes so regenerating a recap does not erase user edits.
+    var meeting: MeetingWorkspace?
 
     // MARK: Audio bookkeeping
     //
@@ -267,6 +270,7 @@ struct Recording: Codable, Identifiable, Hashable {
     }
 
     var isProcessed: Bool { recap != nil }
+    var isMeetingPreparation: Bool { mode == .meeting && meeting != nil && !hasAudio && segments.isEmpty && recap == nil }
 
     var hasAudio: Bool { audioFilename != nil && !audioRemoved }
 
@@ -308,6 +312,11 @@ struct Recording: Codable, Identifiable, Hashable {
             parts += (r.bookmarks ?? []).flatMap { [$0.heading, $0.insight] }
             parts += (r.terms ?? []).flatMap { [$0.term, $0.definition] }
         }
+        if let meeting {
+            parts += meeting.followUps.map(\.title)
+            parts += meeting.outcomes.map(\.text)
+            parts.append(meeting.agenda)
+        }
         return parts.joined(separator: " ")
     }
 
@@ -322,6 +331,7 @@ struct Recording: Codable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, deleted, mode, audioFilename
         case duration, segments, recap, brainID, processingError, completedActions
+        case meeting
         case audioBytes, audioCodec, audioBitRate, audioSampleRate, audioChannels
         case audioRemoved, keepAudioDownloaded, lastPlayedAt, cloudAssetID, optimizeFailed
         case pretestedAt, pretestAsked, pretestCorrect
@@ -342,6 +352,7 @@ struct Recording: Codable, Identifiable, Hashable {
         brainID = try c.decodeIfPresent(UUID.self, forKey: .brainID)
         processingError = try c.decodeIfPresent(String.self, forKey: .processingError)
         completedActions = try c.decodeIfPresent([Int].self, forKey: .completedActions) ?? []
+        meeting = try c.decodeIfPresent(MeetingWorkspace.self, forKey: .meeting)
         audioBytes = try c.decodeIfPresent(Int64.self, forKey: .audioBytes)
         audioCodec = try c.decodeIfPresent(String.self, forKey: .audioCodec)
         audioBitRate = try c.decodeIfPresent(Int.self, forKey: .audioBitRate)

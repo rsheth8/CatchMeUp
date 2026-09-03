@@ -8,6 +8,7 @@ struct BrainGraphNode: Identifiable, Hashable {
     let definition: String
     let weight: Int
     let recordingIDs: [UUID]
+    let materialIDs: [UUID]
     let position: CGPoint
 }
 
@@ -22,11 +23,12 @@ struct BrainGraph: Hashable {
     let nodes: [BrainGraphNode]
     let edges: [BrainGraphEdge]
 
-    static func build(from recordings: [Recording]) -> BrainGraph {
+    static func build(from recordings: [Recording], materials: [SupplementalMaterial] = []) -> BrainGraph {
         struct Candidate {
             var label: String
             var definition: String
             var recordings: Set<UUID> = []
+            var materials: Set<UUID> = []
         }
 
         var candidates: [String: Candidate] = [:]
@@ -66,9 +68,28 @@ struct BrainGraph: Hashable {
             if !episodeIDs.isEmpty { conceptsByRecording.append(episodeIDs) }
         }
 
+        for material in materials where material.state.isReady {
+            var episodeIDs: [String] = []
+            for concept in material.concepts.prefix(12) {
+                let label = concept.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard label.count >= 3, label.count <= 42 else { continue }
+                let id = normalized(label)
+                guard !id.isEmpty else { continue }
+                let definition = concept.pageNumbers.first.flatMap { number in
+                    material.pages.first { $0.number == number }?.text
+                }.map { String($0.prefix(280)) } ?? ""
+                var candidate = candidates[id] ?? Candidate(label: label, definition: definition)
+                candidate.materials.insert(material.id)
+                if candidate.definition.isEmpty { candidate.definition = definition }
+                candidates[id] = candidate
+                episodeIDs.append(id)
+            }
+            if !episodeIDs.isEmpty { conceptsByRecording.append(episodeIDs) }
+        }
+
         let rankedIDs = candidates.keys.sorted { lhs, rhs in
-            let left = candidates[lhs]?.recordings.count ?? 0
-            let right = candidates[rhs]?.recordings.count ?? 0
+            let left = (candidates[lhs]?.recordings.count ?? 0) + (candidates[lhs]?.materials.count ?? 0)
+            let right = (candidates[rhs]?.recordings.count ?? 0) + (candidates[rhs]?.materials.count ?? 0)
             if left != right { return left > right }
             return lhs < rhs
         }
@@ -105,8 +126,9 @@ struct BrainGraph: Hashable {
                 id: id,
                 label: candidate.label,
                 definition: candidate.definition,
-                weight: candidate.recordings.count,
+                weight: candidate.recordings.count + candidate.materials.count,
                 recordingIDs: candidate.recordings.sorted { $0.uuidString < $1.uuidString },
+                materialIDs: candidate.materials.sorted { $0.uuidString < $1.uuidString },
                 position: positions[id] ?? .zero
             )
         }
@@ -217,10 +239,12 @@ struct BrainGraphScreen: View {
     let recordings: [Recording]
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(MaterialStore.self) private var materialStore
 
     var body: some View {
         NavigationStack {
-            BrainGraphView(brain: brain, recordings: recordings)
+            BrainGraphView(brain: brain, recordings: recordings,
+                           materials: materialStore.materials(inBrain: brain.id))
                 .navigationTitle("Neural map")
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationDestination(for: UUID.self) { RecapDetailView(recordingID: $0) }
@@ -238,15 +262,18 @@ struct BrainGraphScreen: View {
 struct BrainGraphView: View {
     let brain: Brain
     let recordings: [Recording]
+    let materials: [SupplementalMaterial]
     private let graph: BrainGraph
 
     @State private var selectedID: String?
     @State private var resetToken = 0
+    @State private var selectedMaterial: SupplementalMaterial?
 
-    init(brain: Brain, recordings: [Recording]) {
+    init(brain: Brain, recordings: [Recording], materials: [SupplementalMaterial] = []) {
         self.brain = brain
         self.recordings = recordings
-        self.graph = BrainGraph.build(from: recordings)
+        self.materials = materials
+        self.graph = BrainGraph.build(from: recordings, materials: materials)
     }
 
     var body: some View {
@@ -278,6 +305,9 @@ struct BrainGraphView: View {
         .padding(.top, 8)
         .padding(.bottom, Metric.gutter)
         .background(AmbientBackground(tint: brain.mode.accent))
+        .sheet(item: $selectedMaterial) { material in
+            MaterialDetailView(materialID: material.id, tint: brain.mode.accent)
+        }
     }
 
     private func mapToolbar(_ graph: BrainGraph) -> some View {
@@ -362,6 +392,7 @@ struct BrainGraphView: View {
                 graph.nodes.first { $0.id == (edge.source == node.id ? edge.target : edge.source) }
             }
         let sources = recordings.filter { node.recordingIDs.contains($0.id) }
+        let materialSources = materials.filter { node.materialIDs.contains($0.id) }
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
@@ -373,7 +404,7 @@ struct BrainGraphView: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(node.label).font(.headline)
-                    Text("\(node.weight) source recap\(node.weight == 1 ? "" : "s")")
+                    Text("\(node.weight) supporting source\(node.weight == 1 ? "" : "s")")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -419,6 +450,25 @@ struct BrainGraphView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "doc.text.fill").foregroundStyle(nodeTint(node))
                         Text(recording.displayTitle)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            ForEach(materialSources.prefix(2)) { material in
+                Button {
+                    selectedMaterial = material
+                    Haptics.tap()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: material.kind.symbol).foregroundStyle(nodeTint(node))
+                        Text(material.name)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)

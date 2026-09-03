@@ -61,6 +61,7 @@ final class AppRouter {
     var libraryQuery = ""
     var recorderMode: Mode?
     var recorderBrainID: UUID?
+    var recorderRecordingID: UUID?
     /// Set by a `catchmeup://study?brain=` link; the Study tab picks it up once
     /// and clears it, so a later manual filter change isn't fought over.
     var studyBrainID: UUID?
@@ -238,12 +239,45 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
 // MARK: - Reminders
 
 enum ReminderExporter {
+    /// Idempotent per follow-up, including after reinstall/metadata loss when
+    /// the deep link can still find the exported reminder. No background writes.
+    @MainActor
+    static func add(task: MeetingFollowUp, recording: Recording) async throws -> String {
+        guard !task.needsReview else { throw ExportError.reviewRequired }
+        let eventStore = EKEventStore()
+        guard try await eventStore.requestFullAccessToReminders() else { throw ExportError.accessDenied }
+        guard let calendar = eventStore.defaultCalendarForNewReminders() else { throw ExportError.noDefaultList }
+        let url = URL(string: "\(CatchMeUpLink.recap(recording.id).absoluteString)?followUp=\(task.id.uuidString)")!
+        let matches = await withCheckedContinuation { continuation in
+            eventStore.fetchReminders(matching: eventStore.predicateForReminders(in: nil)) {
+                continuation.resume(returning: $0 ?? [])
+            }
+        }
+        let existing = task.reminderID.flatMap { eventStore.calendarItem(withIdentifier: $0) as? EKReminder }
+            ?? matches.first(where: { $0.url == url })
+        let reminder = existing ?? EKReminder(eventStore: eventStore)
+        reminder.calendar = existing?.calendar ?? calendar
+        reminder.title = task.title
+        reminder.notes = ["From CatchMeUp · \(recording.displayTitle)",
+                          task.owner.isEmpty ? "" : "Owner: \(task.owner)",
+                          task.deadlineText.isEmpty ? "" : "As stated: \(task.deadlineText)"].filter { !$0.isEmpty }.joined(separator: "\n")
+        reminder.url = url
+        reminder.dueDateComponents = task.dueDate.map {
+            Calendar.current.dateComponents([.year, .month, .day], from: $0)
+        }
+        reminder.isCompleted = task.status == .done
+        try eventStore.save(reminder, commit: true)
+        return reminder.calendarItemIdentifier
+    }
+
     enum ExportError: LocalizedError {
         case accessDenied
         case noDefaultList
+        case reviewRequired
 
         var errorDescription: String? {
             switch self {
+            case .reviewRequired: return "Review this follow-up before adding it to Reminders."
             case .accessDenied: return "Allow Reminders access in Settings to add this follow-up."
             case .noDefaultList: return "Choose a default list in Reminders, then try again."
             }

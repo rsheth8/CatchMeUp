@@ -625,7 +625,7 @@ struct RecapRow: View {
             // No job and no notes means nothing is running. The old row claimed
             // "Writing your notes…" here, complete with a spinner, for a
             // recording that had been sitting untouched since a suspend.
-            Label("Waiting to start — open to begin", systemImage: "clock")
+            Label(recording.isMeetingPreparation ? "Prepared · ready to record" : "Waiting to start — open to begin", systemImage: "clock")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         } else if let gist = recording.recap?.tldr?.first, !gist.isEmpty {

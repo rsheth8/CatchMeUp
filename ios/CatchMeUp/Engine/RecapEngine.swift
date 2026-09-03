@@ -26,6 +26,7 @@ protocol RecapEngine {
     ) async throws -> Recap
 
     func answer(question: String, persona: String, context: RetrievedContext) async throws -> String
+    func extractMeeting(transcript: String, documents: String, agenda: String) async throws -> MeetingExtraction
 }
 
 extension RecapEngine {
@@ -62,7 +63,7 @@ extension RecapEngine {
                 question: question,
                 persona: persona,
                 context: String(context.text.prefix(contextBudget)),
-                sources: context.recaps.map(\.displayTitle)
+                sources: context.sourceTitles
             ),
             maxTokens: 1500
         )
@@ -273,6 +274,18 @@ struct AppleOnDeviceEngine: RecapEngine {
             if case .unsupportedGuide = error {
                 return try await jsonRecapPass(mode: mode, transcript: transcript, part: part, of: total)
             }
+            throw Self.translate(error)
+        }
+    }
+
+    func extractMeeting(transcript: String, documents: String, agenda: String) async throws -> MeetingExtraction {
+        let session = try makeSession(instructions: MeetingAnalysis.instructions)
+        do {
+            return try await session.respond(
+                to: "AGENDA (planned only):\n\(agenda)\nTRANSCRIPT:\n\(transcript)\nPROVIDED DOCUMENTS:\n\(documents)",
+                generating: GeneratedMeetingAnalysis.self
+            ).content.extraction
+        } catch let error as LanguageModelSession.GenerationError {
             throw Self.translate(error)
         }
     }

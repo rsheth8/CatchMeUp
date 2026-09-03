@@ -108,6 +108,11 @@ ${BOLD}Brains${RESET}  ${DIM}one specialist per subject or team${RESET}
   watch NAME            Watch that brain's inbox/
   mcp install           Let Cursor talk to your brains
 
+${BOLD}iPhone${RESET}  ${DIM}one library across the Mac and the app${RESET}
+  sync                  What the Mac and the iPhone are each holding
+  sync push             Send recaps to the iPhone
+  sync pull             Bring recordings made on the iPhone into your brains
+
 ${BOLD}Library${RESET}  ${DIM}everything you've already recapped${RESET}
   library               List recaps
   search WORDS          Find a topic
@@ -357,6 +362,34 @@ Expose brains to Cursor / Claude Desktop.
 
   ./catchup mcp install
   ./catchup mcp                # stdio server (usually started by the editor)
+EOF
+      ;;
+    sync|iphone|ios)
+      header "help · sync"
+      cat <<EOF
+One library across the Mac and the iPhone.
+
+  ./catchup sync                    what each side is holding
+  ./catchup sync push               send recaps to the iPhone
+  ./catchup sync push --with-audio  include archived audio (large)
+  ./catchup sync push --brain cs61a just one brain
+  ./catchup sync pull               file iPhone recordings into your brains
+  ./catchup sync push --dry-run     report without writing
+
+The app keeps its library in its own iCloud Drive folder, which on this Mac is
+an ordinary directory. The CLI reads and writes that folder and Apple moves the
+bytes — no server, and audio never reaches anyone else.
+
+Turn it on once in the app: Settings ▸ Sync. Both devices need the same Apple
+Account with iCloud Drive on.
+
+Merges keep whichever side changed last, so a push never unticks an action item
+or resurrects something you deleted on the phone. 'pull' rebuilds that brain's
+cortex, so exam / think / walk see phone recordings too.
+
+Prefer somewhere other than iCloud? Point it anywhere both machines can see:
+
+  CATCHMEUP_SYNC_DIR=~/Dropbox/CatchMeUp ./catchup sync push
 EOF
       ;;
     status|list|logs|log|open)
@@ -1799,6 +1832,25 @@ EOF
   esac
 }
 
+cmd_sync() {
+  local action="${1:-status}"
+  case "$action" in
+    push|pull|status)
+      if [[ $# -gt 0 ]]; then shift; fi
+      ;;
+    -h|--help|help) cmd_help sync; return ;;
+    *)
+      err "Unknown sync action: $action"
+      echo "    ./catchup sync              what each side is holding"
+      echo "    ./catchup sync push         send recaps to the iPhone"
+      echo "    ./catchup sync pull         bring iPhone recordings in"
+      exit 1
+      ;;
+  esac
+  header "Sync · ${action}"
+  run_python -m catchmeup.sync "$action" "$@"
+}
+
 cmd_uninstall_watch() {
   if [[ -f "$WATCH_PLIST" ]]; then
     launchctl unload "$WATCH_PLIST" 2>/dev/null || true
@@ -1857,6 +1909,7 @@ main() {
     brain|brains) cmd_brain "$@" ;;
     into|file-into) cmd_into "$@" ;;
     mcp) cmd_mcp "$@" ;;
+    sync|iphone|ios) cmd_sync "$@" ;;
     logs|log) cmd_logs "$@" ;;
     open) cmd_open "$@" ;;
     install-watch) cmd_install_watch "$@" ;;

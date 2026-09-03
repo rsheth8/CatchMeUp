@@ -3,15 +3,20 @@ import SwiftUI
 @main
 struct CatchMeUpApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var store = LibraryStore()
-    @State private var settings = AppSettings()
+    /// Shared rather than owned, so the background worker and the views are
+    /// looking at the same library. See `LibraryStore.shared`.
+    @State private var store = LibraryStore.shared
+    @State private var settings = AppSettings.shared
     @State private var router = AppRouter()
     /// App-scoped so a conversion survives navigating away from Storage, and so
     /// the import path and the dashboard share one queue.
     @State private var optimizer = AudioOptimizer()
+    @State private var queue = ProcessingQueue.shared
     /// The question bank and schedule. Separate from `LibraryStore` because it
     /// outlives any one recap and syncs on its own files.
     @State private var study = StudyStore()
+
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -20,10 +25,19 @@ struct CatchMeUpApp: App {
                 .environment(settings)
                 .environment(router)
                 .environment(optimizer)
+                .environment(queue)
                 .environment(study)
                 .fontDesign(.rounded)
                 .tint(.brand)
                 .task { await houseKeeping() }
+                .onChange(of: scenePhase) { _, phase in
+                    // Coming back to the foreground is the common way a parked
+                    // job gets picked up — the scheduled task is the fallback
+                    // for when the user doesn't return for a while.
+                    if phase == .active {
+                        Task { await queue.resumeUnfinishedWork() }
+                    }
+                }
         }
     }
 
@@ -38,6 +52,11 @@ struct CatchMeUpApp: App {
         // Wired before anything else touches the library, so a deletion during
         // startup still takes its questions with it.
         store.studySink = study
+        // Before anything slow: a recording left half-processed by a crash or a
+        // suspend should be moving again by the time the library draws.
+        queue.enqueuePendingFromStore()
+
+
         await store.reconcileCloudAudio()
         await optimizer.scanLibrary(store: store)
         // Any recap finished while the app was closed gets its questions now,

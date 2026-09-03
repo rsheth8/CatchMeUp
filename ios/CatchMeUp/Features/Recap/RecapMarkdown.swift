@@ -12,31 +12,39 @@ enum RecapMarkdown {
             out += "\n"
         }
 
+        list(RecapLayout.gistTitle(for: rec.mode), r.tldr)
+
         if rec.mode == .meeting {
-            list("TL;DR", r.tldr)
             list("Action items", r.actionItems)
-        } else {
-            list("What you missed", r.tldr)
         }
 
         if let marks = r.bookmarks, !marks.isEmpty {
-            out += "## \(rec.mode == .meeting ? "Bookmarks" : "Key moments")\n\n"
+            out += "## \(RecapLayout.bookmarksTitle(for: rec.mode))\n\n"
             for m in marks { out += "- **\(m.timestamp) — \(m.heading)**: \(m.insight)\n" }
             out += "\n"
         }
 
         if let notes = r.detailedNotes, !notes.isEmpty {
-            out += "## \(rec.mode == .meeting ? "Detailed notes" : "Notes by topic")\n\n"
+            out += "## \(RecapLayout.notesTitle(for: rec.mode))\n\n"
             for n in notes { out += "### \(n.heading)\n\n\(n.content)\n\n" }
         }
 
-        if let terms = r.terms, !terms.isEmpty {
-            out += "## Terms\n\n"
-            for t in terms { out += "- **\(t.term)** — \(t.definition)\n" }
-            out += "\n"
+        if rec.mode == .lecture {
+            if let terms = r.terms, !terms.isEmpty {
+                out += "## Terms\n\n"
+                for t in terms { out += "- **\(t.term)** — \(t.definition)\n" }
+                out += "\n"
+            }
+            list("Study checklist", r.study)
+            list("Action items", r.actionItems)
+        } else {
+            if let terms = r.terms, !terms.isEmpty {
+                out += "## Terms\n\n"
+                for t in terms { out += "- **\(t.term)** — \(t.definition)\n" }
+                out += "\n"
+            }
+            list("Study checklist", r.study)
         }
-
-        list("Study checklist", r.study)
 
         if let sp = r.speakers, !sp.isEmpty {
             out += "## Who was there\n\n"

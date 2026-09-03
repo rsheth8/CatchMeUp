@@ -102,6 +102,9 @@ The table below is the everyday set. New commands land in `./catchup help` first
 | `./catchup todos` | Action items from all meetings |
 | `./catchup moments` | Timestamps from the latest recap |
 | `./catchup play HH:MM:SS` | Play 25s of that moment |
+| `./catchup sync` | What the Mac and the iPhone each hold |
+| `./catchup sync push` | Send recaps to the iPhone (add `--with-audio` for playback) |
+| `./catchup sync pull` | File iPhone recordings into CLI brains |
 | `./catchup install-watch meeting\|lecture` | Background watcher (launchd) |
 
 ---
@@ -138,6 +141,31 @@ If the filename already says `lecture`, `class`, `week`, `zoom`, `standup`, `1-1
 
 ---
 
+## Mac + iPhone (one library)
+
+The CLI is the batch engine. The iOS app is the pocket surface. They share a library through the app's iCloud Drive folder — no extra account, and audio never reaches a third party.
+
+1. On the iPhone: **Settings ▸ Sync** on, signed into the same Apple Account as this Mac.
+2. Recap as usual (`./catchup lecture FILE`, `./catchup into cs61a DIR`). When the iCloud folder already exists, CatchMeUp pushes the notes to the phone by itself.
+3. Record a lecture on the phone, then `./catchup sync pull` so exam / clip / think see it too.
+
+```bash
+./catchup sync                 # what each side is holding
+./catchup sync push            # send recaps (notes + transcripts)
+./catchup sync push --with-audio
+./catchup sync pull            # file iPhone recordings into your brains
+```
+
+Prefer Dropbox or a USB stick instead of iCloud?
+
+```bash
+CATCHMEUP_SYNC_DIR=~/Dropbox/CatchMeUp ./catchup sync push
+```
+
+Turn auto-push off with `CATCHMEUP_SYNC=0`. The Simulator helper `ios/tools/load_cli_data.py` is only for development — a real iPhone uses this path.
+
+---
+
 ## After the recap (the unique part)
 
 Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is **named specialist agents**, each bound to a folder of recaps that *you actually missed*:
@@ -148,7 +176,7 @@ Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is **named
 | `brains/acme-client/` | Account memory | “What did we promise them about billing?” |
 | `brains/standups/` | Team historian | “Who owns the auth migration?” |
 
-Each brain has a **persona** (how it should think), an **inbox** (drop recordings), and a **recap corpus** the RAG search cannot leave. Cursor talks to the same agents over **MCP**.
+Each brain has a **persona** (how it should think), an **inbox** (drop recordings), and a **recap corpus** the RAG search cannot leave. Ask it from the terminal (`./catchup ask cs61a …`) or from the iOS app.
 
 ```bash
 ./catchup brain new cs61a --lecture
@@ -163,11 +191,10 @@ Each brain has a **persona** (how it should think), an **inbox** (drop recording
 ./catchup diff cs61a
 ./catchup cortex cs61a
 ./catchup watch cs61a          # anything dropped in brains/cs61a/inbox/
-
-./catchup mcp install          # Cursor: “ask the cs61a brain about heaps”
+./catchup sync push            # same library on the iPhone
 ```
 
-Otter and Fireflies summarize one call in the cloud. CatchMeUp keeps a **local library** of everything you missed, then you query a *specific* brain from the terminal or from Cursor.
+Otter and Fireflies summarize one call in the cloud. CatchMeUp keeps a **local library** of everything you missed, then you query a *specific* brain from the terminal or from the iPhone.
 
 Each recap also writes Markdown and Word into `output/`. Read concepts **in CatchMeUp** — you do not need Obsidian or another notes app:
 

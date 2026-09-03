@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Speech
 
@@ -30,38 +31,90 @@ struct SpeechTranscriber: Transcriber {
             throw TranscriptionError.recognizerUnavailable
         }
 
-        let totalDuration = Self.duration(of: url)
+        let totalDuration = await Self.duration(of: url)
+        let handle = RecognitionHandle()
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let request = SFSpeechURLRecognitionRequest(url: url)
-            request.shouldReportPartialResults = true
-            request.addsPunctuation = true
-            if recognizer.supportsOnDeviceRecognition {
-                request.requiresOnDeviceRecognition = true
-            }
-
-            var finished = false
-            recognizer.recognitionTask(with: request) { result, error in
-                if let error, !finished {
-                    finished = true
-                    continuation.resume(throwing: TranscriptionError.failed(error.localizedDescription))
-                    return
+        // Cancellation has to reach `SFSpeechRecognitionTask` itself. Without
+        // this the recogniser keeps chewing through the file after the queue
+        // has been told to stop, which is both a waste of battery and a way to
+        // end up writing notes for a job nobody is waiting on any more.
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let request = SFSpeechURLRecognitionRequest(url: url)
+                request.shouldReportPartialResults = true
+                request.addsPunctuation = true
+                if recognizer.supportsOnDeviceRecognition {
+                    request.requiresOnDeviceRecognition = true
                 }
-                guard let result else { return }
 
-                if !result.isFinal {
-                    if totalDuration > 0, let last = result.bestTranscription.segments.last {
-                        progress(min(0.99, (last.timestamp + last.duration) / totalDuration))
+                let task = recognizer.recognitionTask(with: request) { result, error in
+                    if let error {
+                        guard handle.finish() else { return }
+                        continuation.resume(
+                            throwing: handle.wasCancelled
+                                ? CancellationError()
+                                : TranscriptionError.failed(error.localizedDescription)
+                        )
+                        return
                     }
-                    return
-                }
+                    guard let result else { return }
 
-                if !finished {
-                    finished = true
+                    if !result.isFinal {
+                        if totalDuration > 0, let last = result.bestTranscription.segments.last {
+                            progress(min(0.99, (last.timestamp + last.duration) / totalDuration))
+                        }
+                        return
+                    }
+
+                    guard handle.finish() else { return }
                     progress(1)
                     continuation.resume(returning: Self.segments(from: result.bestTranscription))
                 }
+
+                // Losing the race against cancellation is possible, so the
+                // handle tears the task down if the flag is already set.
+                handle.attach(task)
             }
+        } onCancel: {
+            handle.cancel()
+        }
+    }
+
+    /// Shared mutable state between the continuation, the recogniser's callback
+    /// queue, and the cancellation handler.
+    private final class RecognitionHandle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: SFSpeechRecognitionTask?
+        private var finished = false
+        private var cancelled = false
+
+        var wasCancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled
+        }
+
+        func attach(_ task: SFSpeechRecognitionTask) {
+            lock.lock()
+            self.task = task
+            let shouldStop = cancelled
+            lock.unlock()
+            if shouldStop { task.cancel() }
+        }
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let task = self.task
+            lock.unlock()
+            task?.cancel()
+        }
+
+        /// True for the one caller that gets to resume the continuation.
+        func finish() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !finished else { return false }
+            finished = true
+            return true
         }
     }
 
@@ -76,9 +129,12 @@ struct SpeechTranscriber: Transcriber {
         guard granted == .authorized else { throw TranscriptionError.notAuthorized }
     }
 
-    private static func duration(of url: URL) -> Double {
+    private static func duration(of url: URL) async -> Double {
         let asset = AVURLAsset(url: url)
-        return CMTimeGetSeconds(asset.duration)
+        if let duration = try? await asset.load(.duration) {
+            return CMTimeGetSeconds(duration)
+        }
+        return 0
     }
 
     /// Group word-level segments into ~sentence chunks so notes get usable timestamps.
@@ -104,19 +160,17 @@ struct SpeechTranscriber: Transcriber {
         if !buffer.isEmpty {
             out.append(Segment(start: chunkStart ?? 0, text: buffer.trimmingCharacters(in: .whitespaces)))
         }
-        if out.isEmpty {
+        if out.isEmpty, !t.formattedString.isEmpty {
             out.append(Segment(start: 0, text: t.formattedString))
         }
         return out
     }
 }
 
-import AVFoundation
-
 struct MockTranscriber: Transcriber {
     func transcribe(url: URL, progress: @escaping (Double) -> Void) async throws -> [Segment] {
         for i in 1...5 {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try await Task.sleep(nanoseconds: 200_000_000)
             progress(Double(i) / 5)
         }
         return SampleData.meetingRecording.segments

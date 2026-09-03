@@ -2,60 +2,73 @@ import Foundation
 
 /// Schemas + prompt assembly, ported from pipeline.py.
 enum Prompts {
-    static let meetingSchema = """
+    /// One schema for every recap. Empty arrays are omitted after parse; asking
+    /// for only half of this is what made office hours lose their follow-ups.
+    static let unionSchema = """
     Return ONLY valid JSON (no markdown fences, no commentary) matching this shape:
     {
-      "title": "short descriptive meeting title",
-      "tldr": ["bullet 1", "bullet 2", "..."],
-      "action_items": ["Speaker 1 / Jordan: who does what, with deadline if mentioned"],
+      "title": "short descriptive title",
+      "tldr": ["the things someone who missed this must know"],
+      "action_items": ["who does what, with deadline if mentioned"],
       "speakers": [
-        {"label": "Speaker 1", "name": "Jordan or unknown", "said": "their role in this meeting in one line"}
+        {"label": "Speaker 1", "name": "a name only if you hear it", "said": "their role in one line"}
       ],
       "bookmarks": [
         {"timestamp": "HH:MM:SS", "heading": "short label", "insight": "why this moment matters, in plain terms"}
       ],
       "detailed_notes": [
         {"heading": "topic heading", "content": "in-depth notes for this topic, several sentences"}
-      ]
-    }
-    Include 5-15 bookmarks for the important / decision / action-item moments, spread across the whole meeting.
-    Include as many detailed_notes sections as needed to cover the meeting thoroughly.
-    List every follow-up and owner you can hear in action_items. Prefer the speaker label plus any name used.
-    If the transcript has speaker labels, fill speakers[] — do not invent names you cannot hear.
-    """
-
-    static let lectureSchema = """
-    Return ONLY valid JSON (no markdown fences, no commentary) matching this shape:
-    {
-      "title": "short lecture title (course + topic if you can tell)",
-      "tldr": ["the 5-10 things a student who missed class must know"],
-      "bookmarks": [
-        {"timestamp": "HH:MM:SS", "heading": "concept or example name", "insight": "why this matters for the exam"}
-      ],
-      "detailed_notes": [
-        {"heading": "topic heading", "content": "teach this topic clearly in several sentences, as if the student was absent"}
       ],
       "terms": [
         {"term": "vocab / formula / name", "definition": "plain-language definition"}
       ],
       "study": ["exam-style prompt or thing to memorize / practice"]
     }
-    Include 5-15 bookmarks for definitions, worked examples, and "this will be on the exam" moments.
-    Cover the lecture thoroughly in detailed_notes. Prefer teaching over quoting.
+    Include 5-15 bookmarks for the important moments, spread across this part.
+    Cover the recording thoroughly in detailed_notes.
+    Fill action_items and speakers only from what you can hear — never invent a name or owner.
+    Fill terms and study only when material is actually taught. Leave unused arrays empty.
     """
 
     static func schema(for mode: Mode) -> String {
-        mode == .lecture ? lectureSchema : meetingSchema
+        _ = mode
+        return unionSchema
     }
 
-    static func userPrompt(transcript: String, mode: Mode) -> String {
+    /// The prompt for one window of transcript.
+    ///
+    /// `includeSchema` is false for guided generation, where FoundationModels
+    /// describes the shape itself — repeating our JSON schema there would spend
+    /// context we've already chunked the transcript to fit, and give the model
+    /// two descriptions of the same thing to reconcile.
+    static func recapPrompt(
+        transcript: String, mode: Mode, part: Int = 1, of total: Int = 1, includeSchema: Bool = true
+    ) -> String {
+        var blocks = [mode.roleInstruction]
+        if total > 1 { blocks.append(partFraming(part: part, of: total)) }
+        if includeSchema { blocks.append(schema(for: mode)) }
+
+        let heading = total > 1
+            ? "Transcript for part \(part) of \(total) (timestamped):"
+            : "Transcript (timestamped):"
+        blocks.append("\(heading)\n\(transcript)")
+
+        return blocks.joined(separator: "\n\n")
+    }
+
+    /// One slice of a transcript too long for the model's window. The pieces are
+    /// merged in Swift afterwards, so each pass only has to cover its own part
+    /// well — and has to be told not to summarise the whole thing from a
+    /// fragment of it.
+    private static func partFraming(part: Int, of total: Int) -> String {
         """
-        \(mode.roleInstruction)
-
-        \(schema(for: mode))
-
-        Transcript (timestamped):
-        \(transcript)
+        This is part \(part) of \(total) of a longer recording. Cover ONLY what is in \
+        this part. Do not summarise the recording as a whole, do not speculate about \
+        what came before or after, and do not invent timestamps outside this part. \
+        Another pass is handling the other parts and the results will be combined.
+        \(part == 1
+            ? "Give the recording a title based on what you can see here."
+            : "Leave the title empty — part 1 has already named it.")
         """
     }
 
@@ -73,12 +86,30 @@ enum Prompts {
     - Finish with one last line, exactly: `Sources: <recap title>, <recap title>`
     """
 
-    static func askPrompt(question: String, persona: String, context: String) -> String {
+    /// `sources` are the exact recap titles that made it into the context.
+    /// Naming them explicitly is what makes the trailing `Sources:` line worth
+    /// anything — without it the model cites whatever title it half-remembers,
+    /// and a citation nobody can check is worse than none.
+    static func askPrompt(
+        question: String, persona: String, context: String, sources: [String] = []
+    ) -> String {
         let voice = persona.isEmpty ? "You answer questions about a set of recap notes." : persona
+        let sourceRule = sources.isEmpty
+            ? ""
+            : """
+
+            The notes below are excerpts from these recaps, and these are the only \
+            titles you may put in the Sources line — copy them exactly:
+            \(sources.map { "- \($0)" }.joined(separator: "\n"))
+            """
+
         return """
         \(voice)
 
-        Answer the question using ONLY the notes below. If the notes don't cover it, say so.
+        Answer the question using ONLY the notes below. If the notes don't cover it, say so \
+        plainly rather than filling the gap from general knowledge. Lines beginning \
+        "Said [00:00:00]" are direct transcript quotes and can be quoted back.
+        \(sourceRule)
 
         \(answerFormat)
 

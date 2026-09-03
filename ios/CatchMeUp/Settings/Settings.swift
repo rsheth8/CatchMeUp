@@ -72,7 +72,7 @@ enum EngineKind: String, CaseIterable, Identifiable {
     var blurb: String {
         switch self {
         case .demo: return "Uses a built-in sample recap. No account, nothing sent anywhere — good for a first look."
-        case .onDevice: return "Apple's on-device model writes the notes. Free, private, needs iOS 26. Shorter recaps."
+        case .onDevice: return "Apple Intelligence writes the notes right on this iPhone. Free, private, needs iOS 26. Long recordings are covered in several passes, so they take longer."
         case .apiKey: return "Bring a key from Anthropic, OpenAI, Gemini, Groq, Ollama, or any OpenAI-compatible service."
         }
     }
@@ -83,6 +83,10 @@ enum EngineKind: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class AppSettings {
+    /// Shared for the same reason as `LibraryStore.shared`: background work
+    /// needs to know which engine to use without a view being on screen.
+    static let shared = AppSettings()
+
     var hasOnboarded: Bool { didSet { d.set(hasOnboarded, forKey: "hasOnboarded") } }
     var engineKind: EngineKind { didSet { d.set(engineKind.rawValue, forKey: "engineKind") } }
     var providerID: String { didSet { d.set(providerID, forKey: "providerID") } }

@@ -44,6 +44,7 @@ class CliTests(IsolatedHome):
         self.assertIn("diff", result.stdout)
         self.assertIn("./catchup help", result.stdout)
         self.assertIn("walk", result.stdout)
+        self.assertIn("sync", result.stdout)
         page = self.run_cli("help", "exam")
         self.assertIn("Practice test", page.stdout)
         self.assertIn("--print", page.stdout)
@@ -154,6 +155,29 @@ class CliTests(IsolatedHome):
         self.assertIn("Obsidian", help_walk.stdout)
         extra = self.run_cli("obsidian", "cs61a")
         self.assertIn("vault", extra.stdout.lower())
+
+    def test_sync_status_and_push_via_cli(self):
+        shared = self.home / "icloud"
+        shared.mkdir()
+        env_home = os.environ["CATCHMEUP_HOME"]
+        os.environ["CATCHMEUP_SYNC_DIR"] = str(shared)
+        os.environ["CATCHMEUP_SYNC"] = "auto"
+        try:
+            missing = self.run_cli("sync")
+            self.assertIn("CLI library", missing.stdout)
+            self.run_cli("brain", "new", "cs61a", "--lecture")
+            self.seed_lecture("cs61a")
+            pushed = self.run_cli("sync", "push")
+            self.assertIn("Sent", pushed.stdout)
+            self.assertTrue((shared / "recordings.json").is_file())
+            again = self.run_cli("sync")
+            self.assertIn("Shared", again.stdout)
+            help_page = self.run_cli("help", "sync")
+            self.assertIn("iPhone", help_page.stdout)
+        finally:
+            os.environ["CATCHMEUP_HOME"] = env_home
+            os.environ.pop("CATCHMEUP_SYNC_DIR", None)
+            os.environ["CATCHMEUP_SYNC"] = "0"
 
 
 if __name__ == "__main__":

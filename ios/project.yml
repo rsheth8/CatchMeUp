@@ -32,6 +32,21 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app
         INFOPLIST_FILE: CatchMeUp/Info.plist
         CODE_SIGN_ENTITLEMENTS: CatchMeUp/CatchMeUp.entitlements
+    scheme:
+      testTargets:
+        - CatchMeUpTests
+
+  CatchMeUpTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: CatchMeUpTests
+    dependencies:
+      - target: CatchMeUp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app.tests
+        GENERATE_INFOPLIST_FILE: YES
 
   CatchMeUpWidgets:
     type: app-extension

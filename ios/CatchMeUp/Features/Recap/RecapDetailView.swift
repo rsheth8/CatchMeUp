@@ -5,10 +5,9 @@ struct RecapDetailView: View {
     let recordingID: UUID
 
     @Environment(LibraryStore.self) private var store
-    @Environment(AppSettings.self) private var settings
+    @Environment(ProcessingQueue.self) private var queue
     @Environment(\.dismiss) private var dismiss
 
-    @State private var pipeline = RecapPipeline()
     @State private var player = AudioPlayer()
     @State private var showTranscript = false
     @State private var scrubbing = false
@@ -38,8 +37,19 @@ struct RecapDetailView: View {
         .navigationTitle(recording?.displayTitle ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
-        .task(id: recordingID) { await maybeProcess() }
-        .onAppear { refreshAudioState() }
+        // Enqueueing is all this screen does — the queue owns the work, so
+        // walking back to the library no longer cancels it half-done.
+        .onAppear {
+            maybeProcess()
+            refreshAudioState()
+        }
+        // Transcribing pulls the audio down from iCloud and measures it, so the
+        // player bar has something new to say once a job lands.
+        .onChange(of: queue.job(for: recordingID)?.phase) { _, phase in
+            guard phase == .done else { return }
+            refreshAudioState()
+            Haptics.success()
+        }
         .onChange(of: store.audio.cloudItems) { _, _ in refreshAudioState() }
         .onDisappear { player.stop() }
         .userActivity(CatchMeUpLink.recapActivityType, isActive: recording != nil) { activity in
@@ -115,15 +125,19 @@ struct RecapDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 hero(rec)
 
-                if pipeline.isRunning {
-                    ProcessingCard(stage: pipeline.stage, tint: rec.mode.accent)
-                        .transition(.opacity)
+                if let job = queue.job(for: recordingID) {
+                    ProcessingCard(job: job, tint: rec.mode.accent) {
+                        queue.cancel(recordingID)
+                    } onRestyle: { mode in
+                        queue.restyle(recordingID, as: mode)
+                    }
+                    .transition(.opacity)
                 } else if let err = rec.processingError, rec.recap == nil {
                     errorCard(err)
                 }
 
                 if let recap = rec.recap {
-                    if rec.mode == .meeting { meetingBody(rec, recap) } else { lectureBody(recap) }
+                    recapBody(rec, recap)
                 }
 
                 if !rec.segments.isEmpty { transcriptButton(rec) }
@@ -197,12 +211,49 @@ struct RecapDetailView: View {
         }
     }
 
-    // MARK: - Meeting
+    // MARK: - Recap body
 
     @ViewBuilder
-    private func meetingBody(_ rec: Recording, _ r: Recap) -> some View {
-        bulletSection("The gist", "sparkles", r.tldr, tint: rec.mode.accent)
+    private func recapBody(_ rec: Recording, _ r: Recap) -> some View {
+        if rec.mode == .meeting {
+            meetingPrimary(rec, r)
+        } else {
+            lecturePrimary(r)
+        }
 
+        if let summary = RecapLayout.alsoSummary(r, dominant: rec.mode) {
+            AlsoInRecording(summary: summary, tint: rec.mode.accent) {
+                if rec.mode == .lecture {
+                    actionItems(rec, r)
+                    speakers(r)
+                } else {
+                    terms(r)
+                    study(r)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func meetingPrimary(_ rec: Recording, _ r: Recap) -> some View {
+        bulletSection(RecapLayout.gistTitle(for: .meeting), "sparkles", r.tldr, tint: rec.mode.accent)
+        actionItems(rec, r)
+        bookmarksSection(r.bookmarks, title: RecapLayout.bookmarksTitle(for: .meeting))
+        notesSection(r.detailedNotes, title: RecapLayout.notesTitle(for: .meeting))
+        speakers(r)
+    }
+
+    @ViewBuilder
+    private func lecturePrimary(_ r: Recap) -> some View {
+        bulletSection(RecapLayout.gistTitle(for: .lecture), "sparkles", r.tldr, tint: .amber)
+        bookmarksSection(r.bookmarks, title: RecapLayout.bookmarksTitle(for: .lecture))
+        notesSection(r.detailedNotes, title: RecapLayout.notesTitle(for: .lecture), tint: .amber)
+        terms(r)
+        study(r)
+    }
+
+    @ViewBuilder
+    private func actionItems(_ rec: Recording, _ r: Recap) -> some View {
         if let items = r.actionItems, !items.isEmpty {
             section("Action items", "checklist", trailing: "\(items.count - rec.completedActions.count) open") {
                 VStack(alignment: .leading, spacing: 2) {
@@ -253,10 +304,10 @@ struct RecapDetailView: View {
                 }
             }
         }
+    }
 
-        bookmarksSection(r.bookmarks)
-        notesSection(r.detailedNotes)
-
+    @ViewBuilder
+    private func speakers(_ r: Recap) -> some View {
         if let sp = r.speakers, !sp.isEmpty {
             section("Who was there", "person.2") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -283,14 +334,8 @@ struct RecapDetailView: View {
         }
     }
 
-    // MARK: - Lecture
-
     @ViewBuilder
-    private func lectureBody(_ r: Recap) -> some View {
-        bulletSection("What you missed", "sparkles", r.tldr, tint: .amber)
-        bookmarksSection(r.bookmarks, title: "Key moments")
-        notesSection(r.detailedNotes, title: "Notes by topic", tint: .amber)
-
+    private func terms(_ r: Recap) -> some View {
         if let terms = r.terms, !terms.isEmpty {
             section("Terms", "character.book.closed", trailing: "\(terms.count)") {
                 VStack(alignment: .leading, spacing: 0) {
@@ -306,7 +351,10 @@ struct RecapDetailView: View {
                 }
             }
         }
+    }
 
+    @ViewBuilder
+    private func study(_ r: Recap) -> some View {
         if let study = r.study, !study.isEmpty {
             section("Study checklist", "checkmark.circle") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -557,7 +605,7 @@ struct RecapDetailView: View {
                 Label("Couldn't finish the notes", systemImage: "exclamationmark.triangle.fill")
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
                 Text(msg).font(.caption).foregroundStyle(.secondary)
-                Button("Try again") { Task { await runPipeline() } }
+                Button("Try again") { retryProcessing() }
                     .buttonStyle(.prominent(.orange))
             }
         }
@@ -582,8 +630,19 @@ struct RecapDetailView: View {
                         } label: { Label("Copy as Markdown", systemImage: "doc.on.doc") }
 
                         Button {
-                            Task { await pipeline.rewrite(recordingID: recordingID, store: store, settings: settings) }
+                            Haptics.tap()
+                            queue.rewrite(recordingID)
                         } label: { Label("Rewrite notes", systemImage: "arrow.clockwise") }
+
+                        if !rec.segments.isEmpty {
+                            Button {
+                                Haptics.tap()
+                                queue.restyle(recordingID, as: rec.mode == .lecture ? .meeting : .lecture)
+                            } label: {
+                                Label(rec.mode == .lecture ? "Treat as meeting" : "Treat as lecture",
+                                      systemImage: rec.mode == .lecture ? "person.2.wave.2" : "graduationcap")
+                            }
+                        }
                     }
 
                     Menu("Add to brain") {
@@ -708,17 +767,19 @@ struct RecapDetailView: View {
         }
     }
 
-    private func maybeProcess() async {
-        guard let rec = recording else { return }
-        if rec.recap == nil && rec.processingError == nil && !pipeline.isRunning {
-            await runPipeline()
-        }
+    private func maybeProcess() {
+        guard let rec = recording, ProcessingQueue.needsProcessing(rec) else { return }
+        queue.enqueue(recordingID)
     }
 
-    private func runPipeline() async {
-        await pipeline.process(recordingID: recordingID, store: store, settings: settings)
-        refreshAudioState()
-        if recording?.recap != nil { Haptics.success() }
+    /// Clears the recorded failure so the queue stops treating the recording as
+    /// something the user has already been told about.
+    private func retryProcessing() {
+        guard var rec = recording else { return }
+        Haptics.tap()
+        rec.processingError = nil
+        store.upsert(rec)
+        queue.enqueue(recordingID)
     }
 
     private func addToReminders(_ item: String, from rec: Recording) async {
@@ -753,67 +814,220 @@ private struct ReminderNotice: Identifiable {
     let isError: Bool
 }
 
+// MARK: - Also in this recording
+
+/// The other job, behind one row. Mixed audio stays honest without looking like
+/// two products stapled together.
+struct AlsoInRecording<Content: View>: View {
+    let summary: String
+    var tint: Color = .brand
+    @ViewBuilder var content: () -> Content
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                Haptics.tap()
+                withAnimation(.quick) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "plus.square.on.square")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(tint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Also in this recording")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(14)
+                .background(Color.cardBG, in: RoundedRectangle(cornerRadius: Metric.tile, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Metric.tile, style: .continuous)
+                        .strokeBorder(Color.hairline)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Also in this recording")
+            .accessibilityValue(summary)
+            .accessibilityHint(expanded ? "Collapse" : "Show extra notes")
+
+            if expanded {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
 // MARK: - Processing card
 
+/// What the app is doing to a recording right now, and how much longer it will
+/// take. The estimate comes from this phone's own past runs.
 struct ProcessingCard: View {
-    let stage: RecapPipeline.Stage
+    let job: ProcessingQueue.Job
     var tint: Color = .brand
+    var onCancel: (() -> Void)?
+    var onRestyle: ((Mode) -> Void)?
 
-    private let steps: [(String, String)] = [
-        ("Transcribing on device", "waveform"),
-        ("Writing your notes", "sparkles"),
-    ]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var steps: [(String, String)] {
+        [
+            ("Transcribing on device", "waveform"),
+            (job.mode == .lecture ? "Writing lecture notes" : "Writing meeting notes", "sparkles"),
+            ("Ready to read", "checkmark.circle"),
+        ]
+    }
+
+    private var overall: Double {
+        job.overallProgress(ProcessingStatsStore.rates(for: AppSettings.shared.engineKind))
+    }
 
     var body: some View {
         Card(tint: tint) {
-            VStack(alignment: .leading, spacing: 16) {
-                ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
-                    HStack(spacing: 11) {
-                        icon(for: idx)
-                            .frame(width: 22)
-                        Text(step.0)
-                            .font(.subheadline.weight(idx == current ? .semibold : .regular))
-                            .foregroundStyle(idx <= current ? .primary : .secondary)
-                        Spacer()
-                        if case .transcribing(let p) = stage, idx == 0 {
-                            Text("\(Int(p * 100))%")
-                                .font(.caption.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 15) {
+                header
+
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    row(index: index, title: step.0)
+                }
+
+                ProgressView(value: overall)
+                    .tint(job.phase == .paused ? .secondary : tint)
+                    .animation(.gentle, value: overall)
+
+                if job.phase.isActive || job.phase == .queued {
+                    footer
+                    if let onRestyle {
+                        Button {
+                            Haptics.tap()
+                            onRestyle(job.mode == .lecture ? .meeting : .lecture)
+                        } label: {
+                            Text("Treating this as a \(job.mode.title.lowercased()) — tap to restyle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(job.displayLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAddTraits(.updatesFrequently)
+    }
 
-                if case .transcribing(let p) = stage {
-                    ProgressView(value: p).tint(tint)
-                }
+    // MARK: Pieces
 
-                VStack(alignment: .leading, spacing: 7) {
-                    ShimmerLine()
-                    ShimmerLine(width: 210)
-                    ShimmerLine(width: 150)
-                }
-                .padding(.top, 2)
+    private var header: some View {
+        HStack(spacing: 9) {
+            Image(systemName: job.phase.symbol)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(job.phase == .paused ? Color.secondary : tint)
+                .contentTransition(.symbolEffect(.replace))
+            Text(job.displayLabel)
+                .font(.subheadline.weight(.semibold))
+            Spacer(minLength: 8)
+            Text("\(Int(overall * 100))%")
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func row(index: Int, title: String) -> some View {
+        HStack(spacing: 11) {
+            icon(for: index)
+                .frame(width: 20)
+            Text(title)
+                .font(.footnote.weight(index == job.phase.step ? .semibold : .regular))
+                .foregroundStyle(index <= job.phase.step ? .primary : .secondary)
+            Spacer(minLength: 0)
+            if index == job.phase.step, let percent = stepPercent {
+                Text(percent)
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(tint)
             }
         }
     }
 
-    private var current: Int {
-        switch stage {
-        case .transcribing: return 0
-        case .writing: return 1
-        case .done: return 2
-        default: return 0
+    private var footer: some View {
+        HStack(spacing: 8) {
+            if let eta = job.etaSeconds {
+                Text("\(etaText(eta)) left")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            // Leaving is the whole point of doing this in the background, so
+            // say so rather than making the user guess whether it's safe.
+            Text("· keeps going if you leave")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+            if let onCancel {
+                Button("Stop") {
+                    Haptics.tap()
+                    onCancel()
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var stepPercent: String? {
+        switch job.phase {
+        case .transcribing(let p), .writing(let p):
+            guard p > 0 else { return nil }
+            return "\(Int(p * 100))%"
+        default:
+            return nil
         }
     }
 
     @ViewBuilder
-    private func icon(for idx: Int) -> some View {
-        if idx < current {
+    private func icon(for index: Int) -> some View {
+        if index < job.phase.step {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(tint)
-        } else if idx == current {
-            ProgressView().controlSize(.small)
+        } else if index == job.phase.step {
+            switch job.phase {
+            case .paused:
+                Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
+            case .failed:
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(tint)
+            default:
+                // A determinate bar carries the progress; Reduce Motion turns
+                // the spinner into a static marker rather than a second one.
+                if reduceMotion {
+                    Image(systemName: "circle.dotted").foregroundStyle(tint)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
         } else {
             Image(systemName: "circle").foregroundStyle(.tertiary)
         }
+    }
+
+    private var accessibilityValue: String {
+        var parts = ["\(Int(overall * 100)) percent"]
+        if let eta = job.etaSeconds, job.phase.isActive {
+            parts.append("\(etaText(eta)) remaining")
+        }
+        if case .failed(let message) = job.phase { parts.append(message) }
+        return parts.joined(separator: ", ")
     }
 }

@@ -24,20 +24,7 @@ struct BrainsView: View {
                     }
                     .padding(.top, 30)
                 } else {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(store.visibleBrains) { brain in
-                            NavigationLink(value: brain.id) {
-                                BrainCard(brain: brain, count: store.recordings(inBrain: brain.id).count)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    withAnimation(.quick) { store.delete(brain) }
-                                } label: { Label("Delete brain", systemImage: "trash") }
-                            }
-                        }
-                    }
-                    .padding(16)
+                    brainsGrid
                 }
             }
             .background(AmbientBackground())
@@ -64,20 +51,61 @@ struct BrainsView: View {
         }
     }
 
+    @ViewBuilder
+    private var brainsGrid: some View {
+        let courses = store.visibleBrains.filter { $0.mode == .lecture }
+        let work = store.visibleBrains.filter { $0.mode == .meeting }
+        let split = !courses.isEmpty && !work.isEmpty
+
+        LazyVGrid(columns: columns, spacing: 12) {
+            if split {
+                sectionLabel(Mode.lecture.brainKindSection)
+                ForEach(courses) { brainCard($0) }
+                sectionLabel(Mode.meeting.brainKindSection)
+                ForEach(work) { brainCard($0) }
+            } else {
+                ForEach(store.visibleBrains) { brainCard($0) }
+            }
+        }
+        .padding(16)
+    }
+
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.bold))
+            .tracking(1.1)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .gridCellColumns(2)
+    }
+
+    private func brainCard(_ brain: Brain) -> some View {
+        NavigationLink(value: brain.id) {
+            BrainCard(brain: brain, count: store.recordings(inBrain: brain.id).count)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                withAnimation(.quick) { store.delete(brain) }
+            } label: { Label("Delete brain", systemImage: "trash") }
+        }
+    }
+
     private var newBrainSheet: some View {
         NavigationStack {
             Form {
                 Section("Name") {
                     TextField("e.g. CS 61A, Acme client, Standups", text: $newName)
                 }
-                Section("Recap style") {
-                    Picker("Style", selection: $newMode) {
-                        ForEach(Mode.allCases) { Text($0.title).tag($0) }
+                Section("This is") {
+                    Picker("Kind", selection: $newMode) {
+                        Text("A course").tag(Mode.lecture)
+                        Text("Work").tag(Mode.meeting)
                     }
                     .pickerStyle(.segmented)
                 }
                 Section {
-                    Text("Drop recaps into this brain from any recap's ••• menu, then ask questions that only look inside it.")
+                    Text("Drop recaps into this brain from any recap's ••• menu, then ask questions that only look inside it. New recordings started here inherit this kind.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -121,7 +149,7 @@ struct BrainCard: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            Chip(text: brain.mode.title, symbol: brain.mode.symbol, tint: brain.mode.accent)
+            Chip(text: brain.mode.brainKindTitle, symbol: brain.mode.symbol, tint: brain.mode.accent)
         }
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 152, alignment: .topLeading)
@@ -144,6 +172,8 @@ struct BrainDetailView: View {
 
     @Environment(LibraryStore.self) private var store
     @Environment(AppSettings.self) private var settings
+    @Environment(ProcessingQueue.self) private var queue
+    @Environment(AppRouter.self) private var router
 
     @State private var question = ""
     @State private var thread: [QAExchange] = []
@@ -158,6 +188,12 @@ struct BrainDetailView: View {
         let question: String
         var answer: String?
         var error: String?
+        /// The recaps retrieval actually put in front of the model. Citations
+        /// are matched against these rather than the whole brain, so a chip
+        /// can't point at a recap the model never read.
+        var sources: [Recording] = []
+        /// The brain held more matching material than the context budget fit.
+        var clipped = false
     }
 
     private var brain: Brain? { store.brain(brainID) }
@@ -192,6 +228,17 @@ struct BrainDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { composer }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    guard let brain else { return }
+                    Haptics.tap()
+                    router.recorderMode = brain.mode
+                    router.recorderBrainID = brain.id
+                } label: {
+                    Image(systemName: "mic.fill")
+                }
+                .accessibilityLabel("Record into this brain")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { personaDraft = brain?.persona ?? ""; showPersona = true } label: {
@@ -329,13 +376,25 @@ struct BrainDetailView: View {
     }
 
     private func starterQuestions(_ brain: Brain) -> [String] {
-        brain.mode == .lecture
-            ? ["What are the big ideas so far?",
-               "Make me a study plan for what's covered here.",
-               "Which terms keep coming up?"]
-            : ["What's still open across these meetings?",
-               "Summarise the decisions we've made.",
-               "What did I commit to?"]
+        var questions: [String]
+        if brain.mode == .lecture {
+            questions = ["What are the big ideas so far?",
+                         "Make me a study plan for what's covered here.",
+                         "Which terms keep coming up?"]
+            let recs = store.recordings(inBrain: brain.id)
+            if recs.contains(where: { $0.recap?.hasCommitments == true }) {
+                questions.append("What's still open in this class?")
+            }
+        } else {
+            questions = ["What's still open across these meetings?",
+                         "Summarise the decisions we've made.",
+                         "What did I commit to?"]
+            let recs = store.recordings(inBrain: brain.id)
+            if recs.contains(where: { $0.recap?.hasKnowledge == true }) {
+                questions.append("What should I remember from the material that came up?")
+            }
+        }
+        return questions
     }
 
     private var conversation: some View {
@@ -347,7 +406,8 @@ struct BrainDetailView: View {
                     QuestionBubble(text: ex.question, tint: accent)
 
                     if let answer = ex.answer {
-                        BrainAnswerCard(raw: answer, tint: accent, recaps: recaps) {
+                        BrainAnswerCard(raw: answer, tint: accent,
+                                        recaps: ex.sources, clipped: ex.clipped) {
                             Task { await retry(ex.id) }
                         }
                     } else if let error = ex.error {
@@ -385,6 +445,7 @@ struct BrainDetailView: View {
                 ForEach(Array(recs.enumerated()), id: \.element.id) { idx, rec in
                     NavigationLink(value: rec.id) {
                         RecapRow(recording: rec, brainName: nil,
+                                 job: queue.job(for: rec.id),
                                  isFirst: idx == 0, isLast: idx == recs.count - 1)
                     }
                     .buttonStyle(ThreadRowStyle(tint: rec.mode.accent))
@@ -468,9 +529,34 @@ struct BrainDetailView: View {
         defer { asking = false }
 
         let engine = RecapEngineFactory.make(settings)
+        // Retrieval, not "the first twelve": every note, term, moment and
+        // transcript line in the brain is ranked against the question, and the
+        // budget is spent on what matched.
+        //
+        // Off the main actor because a brain holding a few dozen hours of
+        // transcript is a few million characters to tokenise, and the composer
+        // shouldn't freeze while that happens.
+        let budget = engine.contextBudget
+        let retrieved = await Task.detached(priority: .userInitiated) {
+            BrainRetriever.context(for: asked, recaps: recs, budget: budget)
+        }.value
+        if let i = thread.firstIndex(where: { $0.id == id }) {
+            thread[i].sources = retrieved.recaps
+            thread[i].clipped = retrieved.clipped
+        }
+
+        guard !retrieved.isEmpty else {
+            guard let i = thread.firstIndex(where: { $0.id == id }) else { return }
+            withAnimation(.quick) {
+                thread[i].error = "None of the recaps in this brain have notes yet."
+            }
+            Haptics.warning()
+            return
+        }
+
         do {
             let reply = try await engine.answer(question: asked, persona: brain.persona,
-                                                context: context(from: recs))
+                                                context: retrieved)
             guard let i = thread.firstIndex(where: { $0.id == id }) else { return }
             withAnimation(.gentle) { thread[i].answer = reply }
             Haptics.success()
@@ -479,17 +565,5 @@ struct BrainDetailView: View {
             withAnimation(.quick) { thread[i].error = error.localizedDescription }
             Haptics.warning()
         }
-    }
-
-    private func context(from recs: [Recording]) -> String {
-        let joined = recs.prefix(12).map { rec -> String in
-            var s = "## \(rec.displayTitle)\n"
-            if let t = rec.recap?.tldr { s += t.map { "- \($0)" }.joined(separator: "\n") + "\n" }
-            if let n = rec.recap?.detailedNotes {
-                s += n.map { "\($0.heading): \($0.content)" }.joined(separator: "\n") + "\n"
-            }
-            return s
-        }.joined(separator: "\n\n")
-        return String(joined.prefix(14000))
     }
 }

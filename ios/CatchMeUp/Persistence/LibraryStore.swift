@@ -5,6 +5,12 @@ import UIKit
 @MainActor
 @Observable
 final class LibraryStore {
+    /// One store per process. A `BGProcessingTask` can launch the app without
+    /// ever building the view tree, so the background worker needs a way to
+    /// reach the library that doesn't go through the environment — and two
+    /// instances writing the same `recordings.json` would lose recaps.
+    static let shared = LibraryStore()
+
     /// Includes tombstones; use the filtered accessors for UI.
     private(set) var recordings: [Recording] = []
     private(set) var brains: [Brain] = []
@@ -157,6 +163,13 @@ final class LibraryStore {
         // Questions carry their own course, because interleaving and exam plans
         // both work off it. Moving the recap has to move them too.
         studySink?.reassign(recordingID: recordingID, toBrain: brainID)
+        saveRecordings()
+    }
+
+    func setMode(_ recordingID: UUID, _ mode: Mode) {
+        guard let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
+        recordings[i].mode = mode
+        recordings[i].updatedAt = Date()
         saveRecordings()
     }
 

@@ -16,6 +16,11 @@ final class LibraryStore {
     /// ask it where a recording lives rather than assuming.
     let audio: AudioStorage
 
+    /// Told when a recap is deleted or refiled, so its questions follow it.
+    /// Optional and weak: the library is complete without a question bank, and
+    /// nothing here should keep one alive.
+    @ObservationIgnored weak var studySink: StudyItemSink?
+
     private let localDir: URL
     private var metadataQuery: NSMetadataQuery?
     private var cloudObserverTokens: [NSObjectProtocol] = []
@@ -117,6 +122,9 @@ final class LibraryStore {
             recordings[i].deleted = true
             recordings[i].updatedAt = Date()
         }
+        // Tombstone the questions in the same breath. Both sides soft-delete,
+        // so this still merges correctly across devices.
+        studySink?.deleteItems(forRecording: recording.id)
         saveRecordings()
     }
 
@@ -146,6 +154,9 @@ final class LibraryStore {
         guard let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
         recordings[i].brainID = brainID
         recordings[i].updatedAt = Date()
+        // Questions carry their own course, because interleaving and exam plans
+        // both work off it. Moving the recap has to move them too.
+        studySink?.reassign(recordingID: recordingID, toBrain: brainID)
         saveRecordings()
     }
 

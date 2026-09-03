@@ -141,6 +141,8 @@ struct SettingsView: View {
                     Text("Find recaps from the Home Screen, record while your iPhone is locked, start with Siri, follow progress on the Lock Screen or Dynamic Island, and continue a recap on another Apple device.")
                 }
 
+                studySection
+
                 Section {
                     Picker(selection: $settings.defaultMode) {
                         ForEach(Mode.allCases) { Text($0.title).tag($0) }
@@ -190,6 +192,109 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+        }
+    }
+
+    // MARK: - Study
+    //
+    // The scheduler's trade-offs stated out loud rather than tuned in secret.
+    // A higher retention target isn't "better" — it's more reviews for the same
+    // material, and someone choosing it should see that in the same breath.
+
+    @ViewBuilder
+    private var studySection: some View {
+        @Bindable var settings = settings
+
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                LabeledContent {
+                    Text(retentionText).monospacedDigit()
+                } label: {
+                    Label("Target recall", systemImage: "target")
+                }
+                Slider(value: $settings.desiredRetention, in: 0.80...0.97, step: 0.01)
+                    .tint(.brand)
+                    .accessibilityValue(retentionText)
+            }
+            .padding(.vertical, 2)
+
+            Stepper(value: $settings.dailyNewLimit, in: 0...50, step: 2) {
+                LabeledContent {
+                    Text("\(settings.dailyNewLimit)").monospacedDigit()
+                } label: {
+                    Label("New per day", systemImage: "sparkles")
+                }
+            }
+
+            Stepper(value: $settings.dailyReviewLimit, in: 20...400, step: 10) {
+                LabeledContent {
+                    Text("\(settings.dailyReviewLimit)").monospacedDigit()
+                } label: {
+                    Label("Reviews per day", systemImage: "checkmark.circle")
+                }
+            }
+        } header: {
+            Text("Study")
+        } footer: {
+            Text(retentionFooter)
+        }
+
+        Section {
+            Toggle(isOn: $settings.modelGrading) {
+                Label("Check answers with the model", systemImage: "text.magnifyingglass")
+            }
+            .disabled(settings.engineKind != .apiKey)
+        } footer: {
+            Text(gradingFooter)
+        }
+
+        Section {
+            Stepper(value: $settings.focusMinutes, in: 10...60, step: 5) {
+                LabeledContent {
+                    Text("\(settings.focusMinutes) min").monospacedDigit()
+                } label: {
+                    Label("Focus block", systemImage: "timer")
+                }
+            }
+            Stepper(value: $settings.breakMinutes, in: 3...20, step: 1) {
+                LabeledContent {
+                    Text("\(settings.breakMinutes) min").monospacedDigit()
+                } label: {
+                    Label("Break", systemImage: "cup.and.saucer")
+                }
+            }
+        } header: {
+            Text("Focus sessions")
+        } footer: {
+            Text("The break isn't padding — stopping is when what you just retrieved settles.")
+        }
+    }
+
+    private var retentionText: String {
+        "\(Int((settings.desiredRetention * 100).rounded()))%"
+    }
+
+    /// Says what the number costs, not just what it is.
+    private var retentionFooter: String {
+        let base = "How likely you want to be to recall something when it comes back. "
+        switch settings.desiredRetention {
+        case ..<0.85:
+            return base + "Below 90% means noticeably fewer reviews, and more things you'll have forgotten by the time you see them. Good for wide reading, risky before an exam."
+        case 0.85..<0.93:
+            return base + "90% is the setting most of the evidence is built on — close to the least work for the most retained."
+        default:
+            return base + "Above 93% the reviews climb steeply for a small gain. Worth it for a licensing exam, wasteful for a survey course. An exam date already raises this on its own as the day approaches."
+        }
+    }
+
+    private var gradingFooter: String {
+        switch settings.engineKind {
+        case .apiKey:
+            return settings.modelGrading
+                ? "When keyword matching can't tell whether a paraphrase counts, one short call settles it. Only for answers that are genuinely ambiguous, so sessions stay fast and mostly offline."
+                : "Answers are marked by keyword matching alone. Fast and fully offline, but it will mark down a correct answer worded differently."
+        default:
+            return "Needs your own API key — switch the engine above. Without it, answers are marked by keyword matching, which works offline but is stricter about wording."
         }
     }
 

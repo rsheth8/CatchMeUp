@@ -37,7 +37,7 @@ enum CatchMeUpLink {
 }
 
 enum AppTab: Hashable {
-    case library, brains, settings
+    case library, study, brains, settings
 }
 
 @MainActor

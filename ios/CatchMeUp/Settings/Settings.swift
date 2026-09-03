@@ -110,6 +110,21 @@ final class AppSettings {
         didSet { d.set(optimizeCloudStorage, forKey: "optimizeCloudStorage") }
     }
 
+    // MARK: Study
+
+    /// The recall probability the schedule aims for. Higher means more reviews
+    /// for the same material — the honest trade, surfaced rather than hidden.
+    var desiredRetention: Double { didSet { d.set(desiredRetention, forKey: "desiredRetention") } }
+    /// Cap on unfamiliar items introduced per day, so a big import doesn't
+    /// bury the user in new material tomorrow.
+    var dailyNewLimit: Int { didSet { d.set(dailyNewLimit, forKey: "dailyNewLimit") } }
+    var dailyReviewLimit: Int { didSet { d.set(dailyReviewLimit, forKey: "dailyReviewLimit") } }
+    /// Spend a model call to re-mark answers keyword matching found ambiguous.
+    var modelGrading: Bool { didSet { d.set(modelGrading, forKey: "modelGrading") } }
+    /// Focus-session lengths, in minutes.
+    var focusMinutes: Int { didSet { d.set(focusMinutes, forKey: "focusMinutes") } }
+    var breakMinutes: Int { didSet { d.set(breakMinutes, forKey: "breakMinutes") } }
+
     /// Kept in the Keychain, not UserDefaults.
     var apiKey: String {
         didSet { Keychain.set(apiKey, for: "apiKey") }
@@ -134,7 +149,29 @@ final class AppSettings {
             ?? .fallback
         allowLocalAudioDeletion = dd.bool(forKey: "allowLocalAudioDeletion")
         optimizeCloudStorage = dd.bool(forKey: "optimizeCloudStorage")
+        // Study defaults are the FSRS/Anki conventions: 90% target retention,
+        // a manageable trickle of new material, no daily review ceiling that
+        // would silently leave work undone.
+        desiredRetention = dd.object(forKey: "desiredRetention") as? Double ?? 0.90
+        dailyNewLimit = dd.object(forKey: "dailyNewLimit") as? Int ?? 12
+        dailyReviewLimit = dd.object(forKey: "dailyReviewLimit") as? Int ?? 120
+        modelGrading = dd.object(forKey: "modelGrading") as? Bool ?? true
+        focusMinutes = dd.object(forKey: "focusMinutes") as? Int ?? 25
+        breakMinutes = dd.object(forKey: "breakMinutes") as? Int ?? 5
         apiKey = Keychain.get("apiKey") ?? ""
+    }
+
+    /// Scheduler configuration assembled from the user's settings.
+    var fsrsParameters: FSRS.Parameters {
+        var params = FSRS.Parameters.default
+        params.desiredRetention = desiredRetention
+        return params
+    }
+
+    /// Model grading needs both the preference and a provider that can answer.
+    var usesModelGrading: Bool {
+        guard modelGrading, engineKind == .apiKey else { return false }
+        return isReady
     }
 
     var provider: Provider { Providers.by(providerID) }

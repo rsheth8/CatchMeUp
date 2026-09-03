@@ -1,25 +1,46 @@
 #!/bin/bash
-# Finds fully-written recordings in recordings/ and runs them through pipeline.py.
-# Used by `./catchup watch meeting|lecture` and the optional launchd watcher.
+# Finds fully-written recordings and runs pipeline.py.
+# Usage: watch_and_process.sh [meeting|lecture] [brain-slug]
 set -u
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RECORDINGS_DIR="$PROJECT_DIR/recordings"
-LOCK_DIR="$PROJECT_DIR/logs/watch.lock.d"
-PYTHON="$PROJECT_DIR/venv/bin/python3"
-MODE="${1:-}"
+DATA_DIR="${CATCHMEUP_HOME:-$PROJECT_DIR}"
+LOCK_DIR="$DATA_DIR/logs/watch.lock.d"
+if [[ -x "$PROJECT_DIR/venv/bin/python3" ]]; then
+    PYTHON="$PROJECT_DIR/venv/bin/python3"
+else
+    PYTHON="$(command -v python3 || true)"
+fi
+MODE=""
+BRAIN=""
 
-mkdir -p "$PROJECT_DIR/logs" "$RECORDINGS_DIR"
+for arg in "$@"; do
+    [ -z "$arg" ] && continue
+    case "$arg" in
+        meeting|lecture) MODE="$arg" ;;
+        *) BRAIN="$arg" ;;
+    esac
+done
+
+if [[ -n "$BRAIN" ]]; then
+    RECORDINGS_DIR="$DATA_DIR/brains/$BRAIN/inbox"
+else
+    RECORDINGS_DIR="$DATA_DIR/recordings"
+fi
+
+mkdir -p "$DATA_DIR/logs" "$RECORDINGS_DIR"
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     exit 0
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
-if [[ ! -x "$PYTHON" ]]; then
-    echo "venv missing — run ./catchup setup" >> "$PROJECT_DIR/logs/pipeline.log"
+if [[ -z "$PYTHON" || ! -x "$PYTHON" ]]; then
+    echo "python3 missing — run ./catchup setup" >> "$DATA_DIR/logs/pipeline.log"
     exit 1
 fi
+
+export CATCHMEUP_HOME="$DATA_DIR"
 
 shopt -s nullglob
 for f in "$RECORDINGS_DIR"/*.mov "$RECORDINGS_DIR"/*.mp4 "$RECORDINGS_DIR"/*.m4a \
@@ -39,9 +60,8 @@ for f in "$RECORDINGS_DIR"/*.mov "$RECORDINGS_DIR"/*.mp4 "$RECORDINGS_DIR"/*.m4a
     [ "$size1" != "$size2" ] && continue
     [ -z "$size2" ] && continue
 
-    if [[ -n "$MODE" ]]; then
-        "$PYTHON" "$PROJECT_DIR/pipeline.py" --mode "$MODE" "$f" >> "$PROJECT_DIR/logs/pipeline.log" 2>&1
-    else
-        "$PYTHON" "$PROJECT_DIR/pipeline.py" "$f" >> "$PROJECT_DIR/logs/pipeline.log" 2>&1
-    fi
+    args=()
+    [[ -n "$MODE" ]] && args+=(--mode "$MODE")
+    [[ -n "$BRAIN" ]] && args+=(--brain "$BRAIN")
+    "$PYTHON" "$PROJECT_DIR/pipeline.py" "${args[@]}" "$f" >> "$DATA_DIR/logs/pipeline.log" 2>&1
 done

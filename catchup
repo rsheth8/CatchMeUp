@@ -5,26 +5,34 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
+export CATCHMEUP_HOME="${CATCHMEUP_HOME:-$PROJECT_DIR}"
+DATA_DIR="$CATCHMEUP_HOME"
+
 PYTHON="$PROJECT_DIR/venv/bin/python3"
-RECORDINGS_DIR="$PROJECT_DIR/recordings"
-OUTPUT_DIR="$PROJECT_DIR/output"
-PROCESSED_DIR="$PROJECT_DIR/processed"
-LOGS_DIR="$PROJECT_DIR/logs"
-ENV_FILE="$PROJECT_DIR/.env"
+RECORDINGS_DIR="$DATA_DIR/recordings"
+OUTPUT_DIR="$DATA_DIR/output"
+PROCESSED_DIR="$DATA_DIR/processed"
+LOGS_DIR="$DATA_DIR/logs"
+if [[ -f "$DATA_DIR/.env" ]]; then
+  ENV_FILE="$DATA_DIR/.env"
+else
+  ENV_FILE="$PROJECT_DIR/.env"
+fi
 LOCK_DIR="$LOGS_DIR/watch.lock.d"
 WATCH_LABEL="com.rsheth8.catchmeup.watch"
 WATCH_PLIST="$HOME/Library/LaunchAgents/${WATCH_LABEL}.plist"
 
-if [[ -t 1 ]]; then
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]] && [[ -z "${CATCHMEUP_PLAIN:-}" ]]; then
   BOLD=$'\033[1m'
   DIM=$'\033[2m'
   GREEN=$'\033[32m'
   YELLOW=$'\033[33m'
   RED=$'\033[31m'
   CYAN=$'\033[36m'
+  MAGENTA=$'\033[35m'
   RESET=$'\033[0m'
 else
-  BOLD="" DIM="" GREEN="" YELLOW="" RED="" CYAN="" RESET=""
+  BOLD="" DIM="" GREEN="" YELLOW="" RED="" CYAN="" MAGENTA="" RESET=""
 fi
 
 ok()   { echo "${GREEN}✓${RESET} $*"; }
@@ -33,54 +41,298 @@ err()  { echo "${RED}✗${RESET} $*" >&2; }
 info() { echo "${CYAN}→${RESET} $*"; }
 header() {
   echo
-  echo "${BOLD}$*${RESET}"
+  if [[ -t 1 && -z "${NO_COLOR:-}" && -z "${CATCHMEUP_PLAIN:-}" ]]; then
+    echo "${CYAN}▁▂▃▅▇${RESET} ${BOLD}$*${RESET} ${CYAN}▇▅▃▂▁${RESET}"
+  else
+    echo "${BOLD}$*${RESET}"
+  fi
   echo "${DIM}$(printf '─%.0s' {1..46})${RESET}"
 }
 
 usage() {
+  local art=""
+  if python_ok || have python3; then
+    art="$(run_python -c "import viz; print(viz.banner())" 2>/dev/null || true)"
+  fi
+  if [[ -n "$art" ]]; then
+    printf '%s\n\n' "$art"
+  else
+    echo "${BOLD}CatchMeUp${RESET}  ${DIM}missed the Zoom. missed lecture. still got the notes.${RESET}"
+    echo
+    echo "  ${DIM}recording → ffmpeg → whisperkit-cli → your LLM → notes${RESET}"
+    echo
+  fi
   cat <<EOF
-${BOLD}CatchMeUp${RESET}  ${DIM}missed the Zoom. missed lecture. still got the notes.${RESET}
+  ${CYAN}./catchup help${RESET}            this list
+  ${CYAN}./catchup help exam${RESET}       details for one command
+  ${CYAN}./catchup demo${RESET}            live terminal play-through
+  ${CYAN}./catchup demo --web${RESET}      clickable graph in the browser
 
-  ${DIM}recording → ffmpeg → whisperkit-cli → your LLM → output/*_notes.docx${RESET}
+${BOLD}Start${RESET}
+  setup                 Install ffmpeg, whisperkit-cli, Python, .env
+  doctor                Check that everything is ready
+  demo                  Live terminal play-through (wave, rec, cortex)
+  demo --web            Same demo as a clickable graph in the browser
+  providers             Companies whose API keys we accept
+  config [COMPANY]      Paste an API key (openai, anthropic, gemini, …)
+  model MODEL           Override that company's default model
+  mode meeting|lecture  Default recap style
 
-  ${BOLD}Work${RESET}      decisions, owners, action items
-  ${BOLD}School${RESET}    concepts, terms, study / exam checklist
+${BOLD}Recap${RESET}
+  meeting FILE          Work Zoom / standup / 1:1
+  lecture FILE          Class / seminar
+  rec [meeting|lecture] Record from the mic, then recap  (Ctrl-C to stop)
+  rec --devices         List microphones
+  drop FILE             Copy a file into recordings/
+  watch meeting|lecture Auto-recap new files in recordings/
 
-${BOLD}Setup${RESET}
-  ./catchup setup              First-time install (ffmpeg + whisperkit-cli + Python + .env)
-  ./catchup doctor             Check that everything is ready
-  ./catchup providers          List companies whose API keys we accept
-  ./catchup config             Pick a company and paste its API key
-  ./catchup config openai      Same, skipping the menu (any provider id)
-  ./catchup model MODEL        Override the default model for that company
-  ./catchup mode meeting|lecture   Default recap style (when you don't pass one)
+${BOLD}Brains${RESET}  ${DIM}one specialist per subject or team${RESET}
+  brain new NAME [--lecture|--meeting]
+  brain list | show NAME | persona NAME
+  into NAME FILE|DIR    Recap a recording (or a whole folder) into that brain
+  rec NAME              Record into that brain's inbox, then recap
+  ask NAME QUESTION     RAG over that brain only
+  think NAME TASK       Deep multi-pass analysis
+  walk NAME [CONCEPT]   Open a concept in this app (hop / clip / graph)
+  notes NAME            List every concept note in a brain
+  graph NAME [CONCEPT]  Open CatchMeUp's own clickable graph
+  trace NAME A B        Shortest path between two ideas
+  exam NAME             Practice exam from its recaps
+  diff NAME             What changed since the last recap
+  clip NAME WORDS       Play the audio of a concept
+  cortex NAME [WORDS]   Concept graph; words light up a node
+  watch NAME            Watch that brain's inbox/
+  mcp install           Let Cursor talk to your brains
 
-${BOLD}Use${RESET}
-  ./catchup meeting FILE       Recap a work meeting / Zoom / standup
-  ./catchup lecture FILE       Recap a class / seminar / recorded lecture
-  ./catchup drop FILE          Copy a recording into recordings/
-  ./catchup watch meeting      Watch recordings/ as work meetings
-  ./catchup watch lecture      Watch recordings/ as lectures
-  ./catchup status             Pending files, latest notes, watcher state
-  ./catchup list               List generated Word notes
-  ./catchup logs               Show recent log  (./catchup logs -f to follow)
-  ./catchup open               Open the output folder in Finder
+${BOLD}Library${RESET}  ${DIM}everything you've already recapped${RESET}
+  library               List recaps
+  search WORDS          Find a topic
+  ask QUESTION          Ask across all recaps
+  quiz                  Flashcards from lecture terms
+  todos                 Action items from meetings
+  moments               Timestamps from the latest recap
+  play HH:MM:SS         Hear 25s of that moment
+  clip WORDS            Jump to a concept's audio
 
-${BOLD}Background watcher (macOS)${RESET}
-  ./catchup install-watch meeting|lecture
-  ./catchup uninstall-watch
+${BOLD}Housekeeping${RESET}
+  status                Pending files, latest notes, watcher
+  list                  Notes in output/
+  logs                  Recent log  (logs -f to follow)
+  open                  Open output/ in Finder
+  obsidian NAME         Optional vault dump (you don't need Obsidian)
+  install-watch meeting|lecture     Background watcher
+  uninstall-watch
 
-${BOLD}Examples${RESET}
+${DIM}Examples${RESET}
   ./catchup meeting ~/Desktop/standup.mov
   ./catchup lecture ~/Downloads/cs61a-week3.mp4
-  ./catchup drop ~/Downloads/zoom-call.m4a && ./catchup watch meeting
-
-Requires macOS, Homebrew, ${BOLD}ffmpeg${RESET}, ${BOLD}whisperkit-cli${RESET}, and an API key from Anthropic, OpenAI, Gemini, Groq, OpenRouter, …
+  ./catchup exam cs61a --print
+  ./catchup clip cs61a mutex
+  ./catchup cortex cs61a mutex
+  ./catchup walk cs61a mutex
+  ./catchup graph cs61a
+  ./catchup rec lecture
+  ./catchup demo
 EOF
 }
 
+cmd_help() {
+  local topic="${1:-}"
+  case "$topic" in
+    ""|help|-h|--help|commands|cmds) usage ;;
+    *) help_topic "$topic" ;;
+  esac
+}
+
+help_topic() {
+  local topic="$1"
+  case "$topic" in
+    setup)
+      header "help · setup"
+      cat <<EOF
+First-time install: Homebrew packages, Python venv, .env.
+
+  ./catchup setup
+  ./catchup doctor          # confirm it's ready
+EOF
+      ;;
+    doctor)
+      header "help · doctor"
+      cat <<EOF
+Checks macOS, Homebrew, ffmpeg, whisperkit-cli, Python, API key, folders.
+
+  ./catchup doctor
+EOF
+      ;;
+    config|providers|provider|model|mode)
+      header "help · config"
+      cat <<EOF
+Bring your own API key. Transcription stays on-device.
+
+  ./catchup providers
+  ./catchup config openai          # or anthropic, gemini, groq, …
+  ./catchup model gpt-4.1-mini
+  ./catchup mode lecture           # default when you don't pass meeting/lecture
+EOF
+      ;;
+    meeting|lecture|recap|work|class)
+      header "help · meeting / lecture"
+      cat <<EOF
+Turn one recording into Word + Markdown notes.
+
+  ./catchup meeting ~/Desktop/standup.mov
+  ./catchup lecture ~/Downloads/week3.mp4
+  ./catchup FILE                   # shortcut; mode guessed from the name
+
+Meetings also label speakers (Speaker 1, Speaker 2, …).
+EOF
+      ;;
+    rec|record|mic)
+      header "help · rec"
+      cat <<EOF
+Record from the Mac microphone, then recap. Ctrl-C stops.
+
+  ./catchup rec --devices
+  ./catchup rec lecture
+  ./catchup rec meeting
+  ./catchup rec cs61a              # into that brain's inbox/
+  ./catchup rec --keep             # save the file, skip recap
+  ./catchup rec --device 0
+
+Needs microphone permission for Terminal / iTerm.
+EOF
+      ;;
+    drop|watch|install-watch|uninstall-watch)
+      header "help · drop / watch"
+      cat <<EOF
+Drop-box for a week of recordings.
+
+  ./catchup drop ~/Downloads/week4.m4a
+  ./catchup watch lecture          # recordings/ as classes
+  ./catchup watch meeting
+  ./catchup watch cs61a            # brains/cs61a/inbox/
+  ./catchup install-watch lecture  # same, via launchd
+  ./catchup uninstall-watch
+EOF
+      ;;
+    brain|brains|into)
+      header "help · brain"
+      cat <<EOF
+A folder specialist: one subject or one team. RAG cannot leave that folder.
+
+  ./catchup brain new cs61a --lecture
+  ./catchup brain new acme-client --meeting
+  ./catchup brain list
+  ./catchup brain persona cs61a You are a CS 61A TA.
+  ./catchup into cs61a ~/Downloads/week3.mp4
+  ./catchup into mit-60001 MIT-6.0001/     # whole course folder; skips ones you already filed
+  ./catchup ask cs61a what is a mutex
+EOF
+      ;;
+    ask|search|library|quiz|todos|moments|play)
+      header "help · library"
+      cat <<EOF
+Query recaps you already have (no new recording needed).
+
+  ./catchup library
+  ./catchup search mutex
+  ./catchup ask what did we decide about billing
+  ./catchup ask cs61a explain environment diagrams
+  ./catchup quiz
+  ./catchup todos
+  ./catchup moments
+  ./catchup play 00:12:40
+EOF
+      ;;
+    think|analyze|cortex|walk|trace|notes|graph|obsidian|vault)
+      header "help · cortex / walk / graph"
+      cat <<EOF
+CatchMeUp is the reader. You do not need Obsidian (or any other notes app).
+
+  ./catchup notes cs61a            # list concepts
+  ./catchup walk cs61a mutex       # open one; hop by name or 1-9
+  ./catchup graph cs61a            # clickable graph in your browser
+  ./catchup graph cs61a mutex      # same, focused on that idea
+  ./catchup cortex cs61a           # ASCII map in the terminal
+  ./catchup trace cs61a mutex heaps
+  ./catchup think cs61a explain mutexes for the midterm
+  ./catchup cortex cs61a --rebuild
+
+Optional extra — dump a vault if you already use Obsidian:
+
+  ./catchup obsidian cs61a
+EOF
+      ;;
+    demo|splash|viz)
+      header "help · demo"
+      cat <<EOF
+Terminal identity. In a real terminal this plays: waveform, rec meter, pipeline, cortex lighting up.
+
+  ./catchup demo
+  ./catchup demo --web               # clickable graph (watch this one)
+  CATCHMEUP_PLAIN=1 ./catchup demo   # ASCII still (pipes / CI)
+EOF
+      ;;
+    exam|midterm|test)
+      header "help · exam"
+      cat <<EOF
+Practice test from that brain's terms, study list, and key moments.
+
+  ./catchup exam cs61a             # type answers; q to quit
+  ./catchup exam cs61a --print     # dump the test
+  ./catchup exam cs61a --print --answers
+  ./catchup exam cs61a -n 6
+EOF
+      ;;
+    diff|drift)
+      header "help · diff"
+      cat <<EOF
+What changed between the two latest recaps in a brain (or the whole library).
+
+  ./catchup diff cs61a             # new / dropped terms and topics
+  ./catchup diff acme-client       # action items opened vs closed
+EOF
+      ;;
+    clip|hear)
+      header "help · clip"
+      cat <<EOF
+Find a concept and play 25 seconds of the archived audio.
+
+  ./catchup clip cs61a mutex
+  ./catchup clip billing
+  ./catchup clip cs61a mutex --print    # show the timestamp, don't play
+EOF
+      ;;
+    mcp)
+      header "help · mcp"
+      cat <<EOF
+Expose brains to Cursor / Claude Desktop.
+
+  ./catchup mcp install
+  ./catchup mcp                # stdio server (usually started by the editor)
+EOF
+      ;;
+    status|list|logs|log|open)
+      header "help · status"
+      cat <<EOF
+  ./catchup status             pending files, latest notes, watcher
+  ./catchup list               Word / Markdown notes in output/
+  ./catchup logs               last log lines
+  ./catchup logs -f            follow
+  ./catchup open               open output/ in Finder
+EOF
+      ;;
+    *)
+      err "No help page for '$topic'."
+      echo "    ./catchup help              full command list"
+      echo "    ./catchup help exam         example of a command page"
+      exit 1
+      ;;
+  esac
+}
+
 ensure_dirs() {
-  mkdir -p "$RECORDINGS_DIR" "$OUTPUT_DIR" "$PROCESSED_DIR" "$LOGS_DIR"
+  mkdir -p "$RECORDINGS_DIR" "$OUTPUT_DIR" "$PROCESSED_DIR" "$LOGS_DIR" "$DATA_DIR/brains"
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -144,6 +396,10 @@ write_env() {
     esac
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
+}
+
+is_brain() {
+  [[ -n "${1:-}" && -f "$DATA_DIR/brains/$1/brain.json" ]]
 }
 
 known_provider() {
@@ -246,8 +502,8 @@ cmd_setup() {
 
 cmd_providers() {
   header "API keys we accept"
-  if python_ok; then
-    "$PYTHON" "$PROJECT_DIR/providers.py" --list
+  if python_ok || have python3; then
+    run_python "$PROJECT_DIR/providers.py" --list
   else
     cat <<'EOF'
 anthropic     Anthropic (Claude)
@@ -427,8 +683,16 @@ cmd_doctor() {
       err "Python packages missing — run ./catchup setup"
       failed=1
     fi
+  elif have python3; then
+    warn "venv missing — using system python3 (run ./catchup setup for an isolated venv)"
+    if python3 -c "import anthropic, openai, docx" 2>/dev/null; then
+      ok "Python packages (anthropic, openai, python-docx)"
+    else
+      err "Python packages missing — run ./catchup setup"
+      failed=1
+    fi
   else
-    err "venv missing — run ./catchup setup"
+    err "python3 missing — brew install python"
     failed=1
   fi
 
@@ -464,6 +728,9 @@ cmd_doctor() {
   echo
   if [[ "$failed" -eq 0 ]]; then
     echo "${GREEN}${BOLD}All good.${RESET}"
+    if python_ok || have python3; then
+      run_python -c "import viz; print(viz.ok_wave())" 2>/dev/null || true
+    fi
     return 0
   else
     echo "${RED}${BOLD}Fix the items above, then run ./catchup doctor again.${RESET}"
@@ -492,7 +759,7 @@ cmd_recap() {
     err "File not found: $file"
     exit 1
   fi
-  if ! python_ok; then
+  if ! python_ok && ! have python3; then
     err "Run ./catchup setup first."
     exit 1
   fi
@@ -502,11 +769,11 @@ cmd_recap() {
   if [[ -n "$mode" ]]; then
     header "CatchMeUp · ${mode}"
     info "$(basename "$file")"
-    "$PYTHON" "$PROJECT_DIR/pipeline.py" --mode "$mode" "$file"
+    run_python "$PROJECT_DIR/pipeline.py" --mode "$mode" "$file"
   else
     header "CatchMeUp"
     info "$(basename "$file")  (mode guessed from name / default)"
-    "$PYTHON" "$PROJECT_DIR/pipeline.py" "$file"
+    run_python "$PROJECT_DIR/pipeline.py" "$file"
   fi
   echo
   ok "Notes are in ${BOLD}output/${RESET}"
@@ -537,20 +804,38 @@ cmd_drop() {
 }
 
 cmd_watch() {
-  local mode
-  mode="$(normalize_mode "${1:-}")"
-  [[ -z "$mode" ]] && mode="$(default_mode)"
-  if ! python_ok; then
+  local mode="" brain=""
+  if is_brain "${1:-}"; then
+    brain="$1"
+    shift || true
+    mode="$(normalize_mode "${1:-}")"
+    if [[ -z "$mode" ]]; then
+      mode="$(run_python -c "import brains; print(brains.load_brain('$brain')['kind'])")"
+    fi
+  else
+    mode="$(normalize_mode "${1:-}")"
+    [[ -z "$mode" ]] && mode="$(default_mode)"
+  fi
+  if ! python_ok && ! have python3; then
     err "Run ./catchup setup first."
     exit 1
   fi
   ensure_dirs
-  header "Watching ${RECORDINGS_DIR}  (${mode})"
-  echo "Drop .mov .mp4 .m4a .mp3 .wav files into recordings/ — Ctrl-C to stop."
+  if [[ -n "$brain" ]]; then
+    mkdir -p "$DATA_DIR/brains/$brain/inbox"
+    header "Watching brains/${brain}/inbox  (${mode})"
+  else
+    header "Watching ${RECORDINGS_DIR}  (${mode})"
+  fi
+  echo "Drop .mov .mp4 .m4a .mp3 .wav files — Ctrl-C to stop."
   echo
   local interval=8
   while true; do
-    "$PROJECT_DIR/watch_and_process.sh" "$mode" || true
+    if [[ -n "$brain" ]]; then
+      "$PROJECT_DIR/watch_and_process.sh" "$mode" "$brain" || true
+    else
+      "$PROJECT_DIR/watch_and_process.sh" "$mode" || true
+    fi
     sleep "$interval"
   done
 }
@@ -606,13 +891,271 @@ cmd_list() {
   header "Notes in output/"
   local f found=0
   shopt -s nullglob
-  for f in "$OUTPUT_DIR"/*.docx; do
+  for f in "$OUTPUT_DIR"/*.docx "$OUTPUT_DIR"/*.md; do
     found=1
     ls -lh "$f" | awk '{print "  " $5 "\t" $9}'
   done
   shopt -u nullglob
   if [[ "$found" -eq 0 ]]; then
     info "Nothing yet. Run: ./catchup meeting <file>  or  ./catchup lecture <file>"
+  fi
+}
+
+run_python() {
+  if python_ok; then
+    "$PYTHON" "$@"
+  elif have python3; then
+    python3 "$@"
+  else
+    err "Run ./catchup setup first."
+    exit 1
+  fi
+}
+
+lib() {
+  load_env
+  run_python "$PROJECT_DIR/library.py" "$@"
+}
+
+optional_mode_args() {
+  local maybe
+  maybe="$(normalize_mode "${1:-}")"
+  if [[ -n "$maybe" ]]; then
+    echo "--mode" "$maybe"
+    shift
+  fi
+  printf '%s\n' "$@"
+}
+
+cmd_library() {
+  header "Library"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  lib library "${extra[@]}"
+}
+
+cmd_search() {
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup search [brain|meeting|lecture] <words>"
+    exit 1
+  fi
+  header "Search"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup search <words>"
+    exit 1
+  fi
+  lib search "${extra[@]}" "$@"
+}
+
+cmd_ask() {
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup ask [brain|meeting|lecture] <question>"
+    exit 1
+  fi
+  header "Ask"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup ask [brain] <question>"
+    exit 1
+  fi
+  lib ask "${extra[@]}" "$@"
+}
+
+cmd_quiz() {
+  header "Quiz"
+  local extra=()
+  if [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  lib quiz "${extra[@]}" "$@"
+}
+
+cmd_todos() {
+  header "Action items"
+  local extra=()
+  if [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  lib todos "${extra[@]}"
+}
+
+cmd_moments() {
+  header "Moments"
+  local extra=()
+  if [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  lib moments "${extra[@]}"
+}
+
+cmd_play() {
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup play [meeting|lecture] HH:MM:SS"
+    exit 1
+  fi
+  header "Play"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra+=(--brain "$1")
+    shift
+  fi
+  if [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra+=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup play HH:MM:SS"
+    exit 1
+  fi
+  lib play "${extra[@]}" "$1"
+}
+
+cmd_clip() {
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup clip [brain] <words>"
+    echo "    ./catchup clip cs61a mutex"
+    echo "    ./catchup clip billing"
+    exit 1
+  fi
+  header "Clip"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra+=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra+=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  if [[ $# -eq 0 ]]; then
+    err "Usage: ./catchup clip [brain] <words>"
+    exit 1
+  fi
+  lib clip "${extra[@]}" "$@"
+}
+
+cmd_diff() {
+  header "Diff"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra+=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
+    extra+=(--mode "$(normalize_mode "$1")")
+    shift
+  fi
+  lib diff "${extra[@]}"
+}
+
+cmd_exam() {
+  header "Exam"
+  local extra=()
+  if is_brain "${1:-}"; then
+    extra+=(--brain "$1")
+    shift
+  fi
+  run_python "$PROJECT_DIR/exam.py" "${extra[@]}" "$@"
+}
+
+cmd_rec() {
+  local mode="" brain="" keep=0 device="" seconds="" fake=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --devices|-l|--list-devices)
+        header "Microphones"
+        run_python "$PROJECT_DIR/record.py" --devices
+        return
+        ;;
+      --keep|--no-recap) keep=1; shift ;;
+      --fake) fake=1; shift ;;
+      --device|-d)
+        device="${2:-}"
+        shift 2 || true
+        ;;
+      -t|--seconds)
+        seconds="${2:-}"
+        shift 2 || true
+        ;;
+      --help|-h)
+        err "Usage: ./catchup rec [meeting|lecture|brain] [--keep] [--device N]"
+        echo "    ./catchup rec                 # default mode, then recap"
+        echo "    ./catchup rec lecture         # class recap after Ctrl-C"
+        echo "    ./catchup rec cs61a           # into that brain's inbox/"
+        echo "    ./catchup rec --devices       # list mics"
+        echo "    ./catchup rec --keep          # save the file, skip recap"
+        exit 0
+        ;;
+      *)
+        if is_brain "$1"; then
+          brain="$1"
+          shift
+        elif [[ -n "$(normalize_mode "$1")" ]]; then
+          mode="$(normalize_mode "$1")"
+          shift
+        else
+          err "Unknown rec argument: $1"
+          echo "    ./catchup rec --help"
+          exit 1
+        fi
+        ;;
+    esac
+  done
+  if [[ -n "$brain" && -z "$mode" ]]; then
+    mode="$(run_python -c "import brains; print(brains.load_brain('$brain')['kind'])")"
+  fi
+  [[ -z "$mode" ]] && mode="$(default_mode)"
+  ensure_dirs
+  local dest stamp
+  stamp="$(date +%Y%m%d_%H%M%S)"
+  if [[ -n "$brain" ]]; then
+    mkdir -p "$DATA_DIR/brains/$brain/inbox"
+    dest="$DATA_DIR/brains/$brain/inbox/rec-${stamp}.m4a"
+  else
+    dest="$RECORDINGS_DIR/rec-${stamp}.m4a"
+  fi
+  header "Record · ${mode}${brain:+ · $brain}"
+  local rec_args=(-o "$dest")
+  [[ -n "$device" ]] && rec_args+=(--device "$device")
+  [[ -n "$seconds" ]] && rec_args+=(--seconds "$seconds")
+  [[ -n "$brain" ]] && rec_args+=(--brain "$brain")
+  [[ "$fake" -eq 1 ]] && rec_args+=(--fake)
+  run_python "$PROJECT_DIR/record.py" "${rec_args[@]}"
+  if [[ ! -f "$dest" ]]; then
+    err "No recording written."
+    exit 1
+  fi
+  ok "Saved $(basename "$dest")"
+  if [[ "$keep" -eq 1 ]]; then
+    echo "    Recap later: ./catchup ${mode} \"$dest\""
+    return
+  fi
+  if [[ -n "$brain" ]]; then
+    cmd_into "$brain" "$dest"
+  else
+    cmd_recap "$mode" "$dest"
   fi
 }
 
@@ -661,7 +1204,12 @@ write_plist() {
   <key>StandardOutPath</key>
   <string>${LOGS_DIR}/watch.out.log</string>
   <key>StandardErrorPath</key>
-  <string>${LOGS_DIR}/watch.err.log</string>
+    <string>${LOGS_DIR}/watch.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CATCHMEUP_HOME</key>
+    <string>${DATA_DIR}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
 </dict>
@@ -693,6 +1241,386 @@ cmd_install_watch() {
   echo "    Remove: ./catchup uninstall-watch"
 }
 
+cmd_brain() {
+  local sub="${1:-list}"
+  shift || true
+  case "$sub" in
+    list|ls)
+      header "Brains"
+      run_python - <<'PY'
+import brains
+rows = brains.list_brains()
+if not rows:
+    print("None yet. Create one:")
+    print("  ./catchup brain new cs61a --lecture")
+    print("  ./catchup brain new acme-client --meeting")
+else:
+    for b in rows:
+        print(f"  {b['slug']:<16} {b.get('kind','?'):<8} {b.get('recap_count',0)} recaps  {b.get('name')}")
+        persona = (b.get("persona") or "").replace("\n", " ")
+        print(f"                   {persona[:88]}")
+        print()
+    print("File a recording:  ./catchup into <slug> FILE")
+    print("Ask it:            ./catchup ask <slug> <question>")
+    print("Cursor MCP:        ./catchup mcp install")
+PY
+      ;;
+    new|create)
+      local name="${1:-}"
+      shift || true
+      if [[ -z "$name" ]]; then
+        err "Usage: ./catchup brain new <name> [--lecture|--meeting]"
+        exit 1
+      fi
+      local kind="lecture"
+      local persona=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --lecture|--class) kind=lecture; shift ;;
+          --meeting|--work) kind=meeting; shift ;;
+          --persona)
+            persona="${2:-}"
+            shift 2 || true
+            ;;
+          *) persona="${persona:+$persona }$1"; shift ;;
+        esac
+      done
+      header "New brain"
+      run_python - "$name" "$kind" "$persona" <<'PY'
+import sys, brains
+name, kind, persona = sys.argv[1], sys.argv[2], sys.argv[3]
+meta = brains.create_brain(name, kind=kind, persona=persona or None)
+print(f"Created {meta['slug']}  ({meta['kind']})")
+print(f"  Folder:  brains/{meta['slug']}/")
+print(f"  Inbox:   brains/{meta['slug']}/inbox/")
+print(f"  Recaps:  brains/{meta['slug']}/recaps/")
+print()
+print("Drop recordings in, or:")
+print(f"  ./catchup into {meta['slug']} /path/to/recording.mov")
+print(f"  ./catchup ask {meta['slug']} your question")
+print(f"  ./catchup brain persona {meta['slug']}")
+PY
+      ;;
+    persona|prompt)
+      local slug="${1:-}"
+      shift || true
+      if [[ -z "$slug" ]] || ! is_brain "$slug"; then
+        err "Usage: ./catchup brain persona <name> [text]"
+        exit 1
+      fi
+      if [[ $# -gt 0 ]]; then
+        run_python - "$slug" "$*" <<'PY'
+import sys, brains
+meta = brains.load_brain(sys.argv[1])
+meta["persona"] = sys.argv[2]
+brains.save_brain(meta)
+print("Persona saved.")
+PY
+      else
+        echo "Paste the persona for this agent (what it should know / sound like)."
+        echo "End with a blank line."
+        local lines="" line
+        while IFS= read -r line; do
+          [[ -z "$line" ]] && break
+          lines+="$line"$'\n'
+        done
+        run_python - "$slug" "$lines" <<'PY'
+import sys, brains
+meta = brains.load_brain(sys.argv[1])
+meta["persona"] = sys.argv[2].strip()
+brains.save_brain(meta)
+print("Persona saved.")
+PY
+      fi
+      ;;
+    show|info)
+      local slug="${1:-}"
+      if [[ -z "$slug" ]] || ! is_brain "$slug"; then
+        err "Usage: ./catchup brain show <name>"
+        exit 1
+      fi
+      run_python - "$slug" <<'PY'
+import sys, json, brains
+print(json.dumps(brains.load_brain(sys.argv[1]), indent=2))
+PY
+      ;;
+    *)
+      err "Usage: ./catchup brain new|list|persona|show"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_think() {
+  if [[ $# -lt 2 ]]; then
+    err "Usage: ./catchup think <brain> <question or task>"
+    echo "    ./catchup think cs61a explain mutexes for the midterm"
+    echo "    ./catchup think acme-client what did we promise on billing?"
+    exit 1
+  fi
+  local slug="$1"
+  shift
+  if ! is_brain "$slug"; then
+    err "No brain named $slug. Create it: ./catchup brain new $slug"
+    exit 1
+  fi
+  header "Think · ${slug}"
+  load_env
+  run_python - "$slug" "$*" <<'PY'
+import sys
+import cortex
+import library
+library.load_env()
+print(cortex.think(sys.argv[1], sys.argv[2]))
+PY
+}
+
+cmd_cortex() {
+  local slug="${1:-}"
+  shift || true
+  if [[ -z "$slug" ]]; then
+    err "Usage: ./catchup cortex <brain> [--rebuild] [words to light up]"
+    echo "    ./catchup cortex cs61a"
+    echo "    ./catchup cortex cs61a mutex"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug."
+    exit 1
+  fi
+  header "Cortex · ${slug}"
+  run_python - "$slug" "$@" <<'PY'
+import sys, cortex
+slug = sys.argv[1]
+args = sys.argv[2:]
+rebuild = False
+query_parts = []
+for a in args:
+    if a in {"--rebuild", "rebuild"}:
+        rebuild = True
+    else:
+        query_parts.append(a)
+if rebuild:
+    cortex.rebuild(slug)
+    print("Rebuilt from recaps.\n")
+query = " ".join(query_parts)
+print(cortex.format_cortex(slug, query=query or None))
+PY
+}
+
+cmd_walk() {
+  local slug="${1:-}"
+  shift || true
+  if [[ -z "$slug" ]]; then
+    err "Usage: ./catchup walk <brain> [concept]"
+    echo "    ./catchup walk cs61a"
+    echo "    ./catchup walk cs61a mutex"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug."
+    exit 1
+  fi
+  header "Walk · ${slug}"
+  local print_only=0
+  if [[ "${1:-}" == "--print" ]]; then
+    print_only=1
+    shift || true
+  fi
+  if [[ "$print_only" -eq 1 ]]; then
+    run_python - "$slug" "$*" <<'PY'
+import sys, cortex
+slug = sys.argv[1]
+query = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+print(cortex.format_walk(slug, query or None))
+PY
+  else
+    run_python - "$slug" "$*" <<'PY'
+import sys, cortex
+slug = sys.argv[1]
+query = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+cortex.run_walk(slug, query or None)
+PY
+  fi
+}
+
+cmd_notes() {
+  local slug="${1:-}"
+  if [[ -z "$slug" ]]; then
+    err "Usage: ./catchup notes <brain>"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug."
+    exit 1
+  fi
+  header "Notes · ${slug}"
+  run_python - "$slug" <<'PY'
+import sys, cortex
+print(cortex.format_notes(sys.argv[1]))
+PY
+}
+
+cmd_graph() {
+  local slug="${1:-}"
+  shift || true
+  if [[ -z "$slug" ]]; then
+    err "Usage: ./catchup graph <brain> [concept]"
+    echo "    ./catchup graph cs61a"
+    echo "    ./catchup graph cs61a mutex"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug."
+    exit 1
+  fi
+  header "Graph · ${slug}"
+  run_python - "$slug" "$*" <<'PY'
+import sys, graph
+slug = sys.argv[1]
+focus = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+path = graph.open_graph(slug, focus or None)
+print(path)
+if not graph.should_open():
+    print("Open that file in a browser (Safari / Chrome). CatchMeUp generated it — nothing else to install.")
+PY
+}
+
+cmd_obsidian() {
+  local slug="${1:-}"
+  local dest="${2:-}"
+  if [[ -z "$slug" ]]; then
+    err "Usage: ./catchup obsidian <brain> [folder]"
+    echo "    Optional export. You do not need Obsidian to use CatchMeUp."
+    echo "    ./catchup walk cs61a mutex"
+    echo "    ./catchup graph cs61a"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug."
+    exit 1
+  fi
+  header "Obsidian export · ${slug}"
+  run_python - "$slug" "$dest" <<'PY'
+import sys, cortex
+slug = sys.argv[1]
+dest = sys.argv[2].strip() or None
+path = cortex.export_obsidian(slug, dest)
+print(f"Wrote vault → {path}")
+print("Open that folder as an Obsidian vault if you want.")
+print("CatchMeUp already reads this brain:  ./catchup graph " + slug)
+PY
+}
+
+cmd_trace() {
+  local slug="${1:-}"
+  shift || true
+  if [[ -z "$slug" || $# -lt 2 ]]; then
+    err "Usage: ./catchup trace <brain> <from> <to>"
+    echo "    ./catchup trace cs61a mutex heaps"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug."
+    exit 1
+  fi
+  local src="$1"
+  shift
+  header "Trace · ${slug}"
+  run_python - "$slug" "$src" "$*" <<'PY'
+import sys, cortex
+print(cortex.format_trace(sys.argv[1], sys.argv[2], sys.argv[3]))
+PY
+}
+
+cmd_demo() {
+  local arg="${1:-}"
+  if [[ "$arg" == "--web" || "$arg" == "web" || "$arg" == "--graph" ]]; then
+    header "Demo · graph"
+    local path
+    path="$(run_python -c "import graph; print(graph.open_demo())")"
+    info "$path"
+    info "Click a neuron. Drag to pull it. Scroll to zoom."
+    return
+  fi
+  if [[ -t 1 && -z "${CATCHMEUP_PLAIN:-}" ]]; then
+    run_python "$PROJECT_DIR/viz.py" --animate
+  else
+    run_python "$PROJECT_DIR/viz.py"
+  fi
+}
+
+cmd_into() {
+  local slug="${1:-}"
+  local src="${2:-}"
+  if [[ -z "$slug" || -z "$src" ]]; then
+    err "Usage: ./catchup into <brain> <recording-file-or-folder>"
+    exit 1
+  fi
+  if ! is_brain "$slug"; then
+    err "No brain named $slug. Create it: ./catchup brain new $slug --lecture"
+    exit 1
+  fi
+  if [[ ! -e "$src" ]]; then
+    err "Not found: $src"
+    exit 1
+  fi
+  load_env
+  local kind
+  kind="$(run_python -c "import brains; print(brains.load_brain('$slug')['kind'])")"
+  if [[ -d "$src" ]]; then
+    header "Into ${slug}  (${kind}, folder)"
+    info "$src"
+    run_python "$PROJECT_DIR/pipeline.py" --mode "$kind" --brain "$slug" "$src"
+    ok "Folder pass done.  ./catchup notes $slug   ·  ./catchup graph $slug"
+    return
+  fi
+  header "Into ${slug}  (${kind})"
+  info "$(basename "$src")"
+  run_python "$PROJECT_DIR/pipeline.py" --mode "$kind" --brain "$slug" "$src"
+  ok "Filed into brains/${slug}/  — ask it: ./catchup ask $slug <question>"
+}
+
+cmd_mcp() {
+  local sub="${1:-run}"
+  case "$sub" in
+    install)
+      header "MCP for Cursor"
+      mkdir -p "$PROJECT_DIR/.cursor"
+      local py
+      if python_ok; then py="$PYTHON"; else py="$(command -v python3)"; fi
+      cat > "$PROJECT_DIR/.cursor/mcp.json" <<EOF
+{
+  "mcpServers": {
+    "catchmeup": {
+      "command": "${py}",
+      "args": ["${PROJECT_DIR}/mcp_server.py"]
+    }
+  }
+}
+EOF
+      ok "Wrote .cursor/mcp.json for this project"
+      echo "    Restart Cursor (or reload MCP) then ask:"
+      echo "    “Using CatchMeUp, list brains and ask cs61a about heaps.”"
+      echo
+      echo "    User-wide: copy mcp.json.example into Cursor MCP settings"
+      echo "    and replace REPLACE_WITH_ABSOLUTE_PATH with:"
+      echo "    $PROJECT_DIR"
+      ;;
+    run)
+      if python_ok; then
+        exec "$PYTHON" "$PROJECT_DIR/mcp_server.py"
+      else
+        exec python3 "$PROJECT_DIR/mcp_server.py"
+      fi
+      ;;
+    *)
+      err "Usage: ./catchup mcp install   or   ./catchup mcp run"
+      exit 1
+      ;;
+  esac
+}
+
 cmd_uninstall_watch() {
   if [[ -f "$WATCH_PLIST" ]]; then
     launchctl unload "$WATCH_PLIST" 2>/dev/null || true
@@ -712,7 +1640,7 @@ main() {
   fi
   shift || true
   case "$cmd" in
-    help|-h|--help) usage ;;
+    help|-h|--help|commands|cmds) cmd_help "$@" ;;
     setup) cmd_setup "$@" ;;
     doctor) cmd_doctor "$@" ;;
     config) cmd_config "$@" ;;
@@ -726,12 +1654,36 @@ main() {
     watch) cmd_watch "$@" ;;
     status) cmd_status "$@" ;;
     list) cmd_list "$@" ;;
+    library|history) cmd_library "$@" ;;
+    search|find) cmd_search "$@" ;;
+    ask) cmd_ask "$@" ;;
+    think|analyze|reason) cmd_think "$@" ;;
+    cortex) cmd_cortex "$@" ;;
+    walk|neuron) cmd_walk "$@" ;;
+    notes|note) cmd_notes "$@" ;;
+    graph|web|map) cmd_graph "$@" ;;
+    obsidian|vault) cmd_obsidian "$@" ;;
+    trace|path) cmd_trace "$@" ;;
+    demo|splash|viz) cmd_demo "$@" ;;
+    quiz|flashcards) cmd_quiz "$@" ;;
+    exam|midterm|test) cmd_exam "$@" ;;
+    diff|drift) cmd_diff "$@" ;;
+    todos|todo|actions) cmd_todos "$@" ;;
+    moments|bookmarks) cmd_moments "$@" ;;
+    play|jump) cmd_play "$@" ;;
+    clip|hear) cmd_clip "$@" ;;
+    rec|record|mic) cmd_rec "$@" ;;
+    brain|brains) cmd_brain "$@" ;;
+    into|file-into) cmd_into "$@" ;;
+    mcp) cmd_mcp "$@" ;;
     logs|log) cmd_logs "$@" ;;
     open) cmd_open "$@" ;;
     install-watch) cmd_install_watch "$@" ;;
     uninstall-watch) cmd_uninstall_watch "$@" ;;
     *)
       err "Unknown command: $cmd"
+      echo "    ./catchup help              all commands"
+      echo "    ./catchup help $cmd         if you meant a topic"
       echo
       usage
       exit 1

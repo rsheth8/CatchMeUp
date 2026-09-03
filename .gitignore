@@ -20,6 +20,9 @@ processed/*
 !processed/.gitkeep
 logs/*
 !logs/.gitkeep
+# Specialist brains (personas + recaps stay on the user's machine)
+brains/**
+!brains/README.md
 
 # OS / editor
 .DS_Store
@@ -29,6 +32,11 @@ logs/*
 .vscode/
 *.swp
 
+# Local lecture corpus (multi-GB OCW rips — never commit)
+MIT-6.0001/
+
 # Local agent / IDE config
 .claude/
 .cursor/
+.pytest_cache/
+.coverage

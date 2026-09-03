@@ -12,6 +12,7 @@ Modes:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,10 +23,8 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
-OUTPUT_DIR = PROJECT_DIR / "output"
-PROCESSED_DIR = PROJECT_DIR / "processed"
-LOGS_DIR = PROJECT_DIR / "logs"
-ENV_FILE = PROJECT_DIR / ".env"
+
+import brains as brains_mod
 
 MODES = ("meeting", "lecture")
 
@@ -45,7 +44,10 @@ Return ONLY valid JSON (no markdown fences, no commentary) matching this shape:
 {
   "title": "short descriptive meeting title",
   "tldr": ["bullet 1", "bullet 2", "..."],
-  "action_items": ["who does what, with deadline if mentioned"],
+  "action_items": ["Speaker 1 / Jordan: who does what, with deadline if mentioned"],
+  "speakers": [
+    {"label": "Speaker 1", "name": "Jordan or unknown", "said": "their role in this meeting in one line"}
+  ],
   "bookmarks": [
     {"timestamp": "HH:MM:SS", "heading": "short label", "insight": "why this moment matters, explained in plain terms"}
   ],
@@ -55,7 +57,8 @@ Return ONLY valid JSON (no markdown fences, no commentary) matching this shape:
 }
 Include 5-15 bookmarks for the important/decision/action-item moments, spread across the whole meeting.
 Include as many detailed_notes sections as needed to cover the meeting thoroughly.
-List every follow-up and owner you can hear in action_items.
+List every follow-up and owner you can hear in action_items. Prefer the speaker label (Speaker 1) plus any name they used.
+If the transcript has speaker labels, fill speakers[] — do not invent names you cannot hear.
 """
 
 LECTURE_SCHEMA = """
@@ -79,22 +82,28 @@ Cover the lecture thoroughly in detailed_notes. Prefer teaching over quoting.
 """
 
 
+def output_dir() -> Path:
+    return brains_mod.output_root()
+
+
+def processed_dir() -> Path:
+    return brains_mod.processed_root()
+
+
+def logs_dir() -> Path:
+    return brains_mod.logs_root()
+
+
 def log(msg):
-    LOGS_DIR.mkdir(exist_ok=True)
+    logs_dir().mkdir(parents=True, exist_ok=True)
     line = f"[{datetime.now().isoformat(timespec='seconds')}] {msg}"
     print(line, flush=True)
-    with open(LOGS_DIR / "pipeline.log", "a") as f:
+    with open(logs_dir() / "pipeline.log", "a") as f:
         f.write(line + "\n")
 
 
 def load_env():
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), value.strip())
+    brains_mod.load_env()
 
 
 def which_bin(name, env_var, fallbacks):
@@ -157,22 +166,140 @@ def to_mp3(source: Path) -> Path:
     return mp3_path
 
 
-def transcribe(mp3_path: Path) -> dict:
+def want_diarize(mode: str) -> bool:
+    raw = (os.environ.get("CATCHMEUP_DIARIZE") or "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on", "always"}:
+        return True
+    return mode == "meeting"
+
+
+def pretty_speaker(raw: str) -> str:
+    """Turn SPEAKER_00 / spk_1 / 0 into a stable 'Speaker N' label."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    named = re.match(r"(?i)^speaker\s+(\d+)$", s)
+    if named:
+        return f"Speaker {int(named.group(1))}"
+    digits = re.search(r"(\d+)$", s)
+    if digits and re.search(r"(?i)(speaker|spk)", s):
+        return f"Speaker {int(digits.group(1)) + 1}"
+    if re.match(r"^\d+$", s):
+        n = int(s)
+        return f"Speaker {n + 1 if n == 0 else n}"
+    return s
+
+
+def segment_speaker(seg: dict) -> str:
+    if not isinstance(seg, dict):
+        return ""
+    for key in ("speaker", "speakerLabel", "speaker_label", "speakerId", "speaker_id"):
+        val = seg.get(key)
+        if val is not None and str(val).strip() != "":
+            return pretty_speaker(str(val))
+    words = seg.get("words") or seg.get("tokens") or []
+    votes: dict[str, int] = {}
+    for w in words:
+        if not isinstance(w, dict):
+            continue
+        sp = w.get("speaker") or w.get("speakerLabel")
+        if sp:
+            label = pretty_speaker(str(sp))
+            votes[label] = votes.get(label, 0) + 1
+    if votes:
+        return max(votes, key=votes.get)
+    return ""
+
+
+def parse_rttm(path: Path) -> list[tuple[float, float, str]]:
+    turns = []
+    if not path.is_file():
+        return turns
+    for line in path.read_text().splitlines():
+        parts = line.split()
+        if len(parts) < 8 or parts[0] != "SPEAKER":
+            continue
+        try:
+            start = float(parts[3])
+            dur = float(parts[4])
+        except ValueError:
+            continue
+        turns.append((start, start + dur, pretty_speaker(parts[7])))
+    return turns
+
+
+def apply_rttm(whisper_json: dict, rttm_path: Path) -> dict:
+    turns = parse_rttm(rttm_path)
+    if not turns:
+        return whisper_json
+    segments = whisper_json.get("segments") or whisper_json.get("transcription", {}).get("segments") or []
+    for seg in segments:
+        if segment_speaker(seg):
+            continue
+        start = float(seg.get("start", seg.get("startTime", 0)) or 0)
+        best = None
+        best_overlap = 0.0
+        end = float(seg.get("end", seg.get("endTime", start + 1)) or (start + 1))
+        for t0, t1, spk in turns:
+            overlap = min(end, t1) - max(start, t0)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best = spk
+        if best:
+            seg["speaker"] = best
+    return whisper_json
+
+
+def transcribe(mp3_path: Path, diarize: bool = False) -> dict:
     json_path = mp3_path.with_suffix(".json")
+    rttm_path = mp3_path.with_suffix(".rttm")
     if not json_path.exists():
-        run([
+        cmd = [
             whisperkit_bin(), "transcribe",
             "--audio-path", str(mp3_path),
             "--language", "en",
             "--report",
             "--report-path", str(mp3_path.parent),
-        ])
+        ]
+        if diarize:
+            cmd.append("--diarization")
+            log("Diarizing speakers (meeting mode)")
+        try:
+            run(cmd)
+        except subprocess.CalledProcessError:
+            if diarize:
+                log("Diarization failed — transcribing without speaker labels")
+                run([
+                    whisperkit_bin(), "transcribe",
+                    "--audio-path", str(mp3_path),
+                    "--language", "en",
+                    "--report",
+                    "--report-path", str(mp3_path.parent),
+                ])
+            else:
+                raise
     if not json_path.exists():
         raise FileNotFoundError(
             f"WhisperKit did not write {json_path.name}. "
             "Run `./catchup doctor` and try again."
         )
-    return json.loads(json_path.read_text())
+    data = json.loads(json_path.read_text())
+    segments = data.get("segments") or data.get("transcription", {}).get("segments") or []
+    has_speakers = any(segment_speaker(s) for s in segments)
+    if diarize and not has_speakers:
+        try:
+            run([
+                whisperkit_bin(), "diarize",
+                "--audio-path", str(mp3_path),
+                "--rttm-path", str(rttm_path),
+            ])
+            data = apply_rttm(data, rttm_path)
+            json_path.write_text(json.dumps(data, indent=2) + "\n")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            log(f"Speaker RTTM skipped: {e}")
+    return data
 
 
 def format_timestamp(seconds: float) -> str:
@@ -185,8 +312,14 @@ def transcript_with_timestamps(whisper_json: dict) -> str:
     for seg in segments:
         start = seg.get("start", seg.get("startTime", 0))
         text = (seg.get("text") or "").strip()
-        if text:
-            lines.append(f"[{format_timestamp(float(start))}] {text}")
+        if not text:
+            continue
+        speaker = segment_speaker(seg)
+        stamp = format_timestamp(float(start))
+        if speaker:
+            lines.append(f"[{stamp}] {speaker}: {text}")
+        else:
+            lines.append(f"[{stamp}] {text}")
     if not lines:
         text = (whisper_json.get("text") or "").strip()
         if text:
@@ -220,7 +353,8 @@ def call_llm(transcript_text: str, mode: str) -> dict:
     else:
         role = (
             "You are analyzing a transcript of a work meeting (standup, Zoom, client call, 1:1). "
-            "Write notes for someone who did not attend: decisions, owners, deadlines, and follow-ups."
+            "Write notes for someone who did not attend: decisions, owners, deadlines, and follow-ups. "
+            "Lines may be labeled Speaker 1, Speaker 2, … — use those labels in action items and speakers[]."
         )
         schema = MEETING_SCHEMA
 
@@ -249,6 +383,19 @@ def build_docx(analysis: dict, source_name: str, recorded_at: str, mode: str) ->
     _bullets(doc, analysis.get("tldr", []))
 
     if mode == "meeting":
+        speakers = analysis.get("speakers") or []
+        if speakers:
+            doc.add_heading("Who spoke", level=1)
+            for sp in speakers:
+                if isinstance(sp, dict):
+                    label = sp.get("name") or sp.get("label") or "Speaker"
+                    said = (sp.get("said") or "").strip()
+                    p = doc.add_paragraph()
+                    name = p.add_run(f"{label}: ")
+                    name.bold = True
+                    p.add_run(said)
+                else:
+                    doc.add_paragraph(str(sp), style="List Bullet")
         items = analysis.get("action_items") or []
         if items:
             doc.add_heading("Action items & follow-ups", level=1)
@@ -288,18 +435,264 @@ def build_docx(analysis: dict, source_name: str, recorded_at: str, mode: str) ->
             doc.add_heading("Study / exam checklist", level=1)
             _bullets(doc, study)
 
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    dest = output_dir()
+    dest.mkdir(parents=True, exist_ok=True)
     suffix = "lecture" if mode == "lecture" else "meeting"
-    out_path = OUTPUT_DIR / f"{Path(source_name).stem}_{suffix}_notes.docx"
+    out_path = dest / f"{Path(source_name).stem}_{suffix}_notes.docx"
     doc.save(out_path)
     return out_path
+
+
+def _md_bullets(items) -> list[str]:
+    return [f"- {item}" for item in (items or [])]
+
+
+def _term_md(item) -> str:
+    if isinstance(item, dict):
+        term = str(item.get("term") or "").strip()
+        definition = str(item.get("definition") or "").strip()
+        if term:
+            return f"- **[[{term}]]:** {definition}"
+        return f"- {definition}"
+    return f"- {item}"
+
+
+def render_markdown(analysis: dict, source_name: str, recorded_at: str, mode: str) -> str:
+    kind = "Lecture" if mode == "lecture" else "Meeting"
+    lines = [
+        f"# {analysis.get('title', source_name)}",
+        "",
+        f"CatchMeUp {kind.lower()} recap  ",
+        f"Source: `{source_name}`  ",
+        f"{kind} date: {recorded_at}",
+        "",
+        f"## {'What you missed' if mode == 'lecture' else 'TL;DR'}",
+        "",
+        *_md_bullets(analysis.get("tldr")),
+        "",
+    ]
+    if mode == "meeting" and analysis.get("speakers"):
+        lines += ["## Who spoke", ""]
+        for sp in analysis.get("speakers") or []:
+            if isinstance(sp, dict):
+                label = sp.get("name") or sp.get("label") or "Speaker"
+                said = (sp.get("said") or "").strip()
+                lines.append(f"- **{label}:** {said}" if said else f"- **{label}**")
+            else:
+                lines.append(f"- {sp}")
+        lines.append("")
+    if mode == "meeting" and analysis.get("action_items"):
+        lines += ["## Action items & follow-ups", ""] + _md_bullets(analysis.get("action_items")) + [""]
+    lines += [f"## {'Key moments' if mode == 'lecture' else 'Key bookmarks & insights'}", ""]
+    for bm in analysis.get("bookmarks") or []:
+        lines.append(f"**[{bm.get('timestamp', '?')}] {bm.get('heading', '')}**  ")
+        lines.append(f"{bm.get('insight', '')}")
+        lines.append("")
+    lines += [f"## {'Lecture notes' if mode == 'lecture' else 'Detailed notes'}", ""]
+    for section in analysis.get("detailed_notes") or []:
+        lines.append(f"### {section.get('heading', '')}")
+        lines.append("")
+        lines.append(section.get("content", ""))
+        lines.append("")
+    if mode == "lecture":
+        if analysis.get("terms"):
+            lines += ["## Terms & definitions", ""]
+            for item in analysis.get("terms") or []:
+                lines.append(_term_md(item))
+            lines.append("")
+        if analysis.get("study"):
+            lines += ["## Study / exam checklist", ""] + _md_bullets(analysis.get("study")) + [""]
+    return "\n".join(lines).strip() + "\n"
+
+
+def build_markdown(analysis: dict, source_name: str, recorded_at: str, mode: str) -> Path:
+    dest = output_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    suffix = "lecture" if mode == "lecture" else "meeting"
+    out_path = dest / f"{Path(source_name).stem}_{suffix}_notes.md"
+    out_path.write_text(render_markdown(analysis, source_name, recorded_at, mode))
+    return out_path
+
+
+def persist_recap(
+    analysis: dict,
+    source: Path,
+    recorded_at: str,
+    mode: str,
+    transcript_text: str,
+    provider: str,
+    brain_slug: str | None = None,
+    md_path: Path | None = None,
+    docx_path: Path | None = None,
+) -> tuple[dict, Path]:
+    """Write notes + catchmeup.json (+ cortex ingest). Used by the pipeline and tests."""
+    if md_path is None:
+        md_path = build_markdown(analysis, source.name, recorded_at, mode)
+    if docx_path is None:
+        try:
+            docx_path = build_docx(analysis, source.name, recorded_at, mode)
+        except ImportError:
+            docx_path = None
+
+    if brain_slug:
+        brains_mod.load_brain(brain_slug)
+        archive_dir = brains_mod.unique_stamp_dir(brains_mod.recaps_dir(brain_slug), source.stem)
+        notes = brains_mod.notes_dir(brain_slug)
+        notes.mkdir(parents=True, exist_ok=True)
+        if md_path and md_path.exists():
+            (notes / md_path.name).write_text(md_path.read_text())
+    else:
+        archive_dir = brains_mod.unique_stamp_dir(processed_dir(), source.stem)
+
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    (archive_dir / "transcript.txt").write_text(transcript_text)
+    record = {
+        "version": 1,
+        "mode": mode,
+        "brain": brain_slug,
+        "title": analysis.get("title") or source.stem,
+        "source": source.name,
+        "source_path": str(source.resolve()),
+        "recorded_at": recorded_at,
+        "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "provider": provider,
+        "audio": source.with_suffix(".mp3").name,
+        "markdown": str(md_path.name) if md_path else "",
+        "docx": str(docx_path.name) if docx_path else "",
+        "analysis": analysis,
+    }
+    (archive_dir / "catchmeup.json").write_text(json.dumps(record, indent=2) + "\n")
+    if brain_slug:
+        import cortex as cortex_mod
+
+        cortex_mod.ingest_recap(brain_slug, record)
+    record["_dir"] = str(archive_dir)
+    return record, archive_dir
 
 
 def archive(*paths: Path, dest_dir: Path):
     dest_dir.mkdir(parents=True, exist_ok=True)
     for p in paths:
         if p.exists():
-            p.rename(dest_dir / p.name)
+            dest = dest_dir / p.name
+            if p.resolve() != dest.resolve():
+                p.rename(dest)
+
+
+def archive_pipeline_outputs(source: Path, mp3_path: Path, dest_dir: Path, keep: bool) -> None:
+    """Move whisper sidecars into the recap folder. Optionally leave the original media."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for p in (
+        mp3_path,
+        mp3_path.with_suffix(".json"),
+        mp3_path.with_suffix(".srt"),
+        mp3_path.with_suffix(".rttm"),
+    ):
+        if p.exists():
+            dest = dest_dir / p.name
+            if p.resolve() != dest.resolve():
+                p.rename(dest)
+    if keep:
+        return
+    dest = dest_dir / source.name
+    if source.exists() and source.resolve() != dest.resolve():
+        source.rename(dest)
+
+
+def ingest_limit() -> int | None:
+    raw = (os.environ.get("CATCHMEUP_INGEST_LIMIT") or "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def process_recording(source: Path, mode: str | None, brain_slug: str | None) -> None:
+    from providers import active_provider, resolve_api_key
+    import viz
+
+    source = source.resolve()
+    mode = mode or guess_mode(source)
+    if mode not in MODES:
+        mode = "meeting"
+    provider = active_provider()
+    if not resolve_api_key(provider) and provider != "ollama":
+        raise RuntimeError(f"no API key for {provider} — run ./catchup config {provider}")
+
+    if brain_slug and source.name in brains_mod.ingested_sources(brain_slug):
+        log(f"Skip (already in {brain_slug}): {source.name}")
+        print(f"Already filed: {source.name}", flush=True)
+        return
+
+    print(viz.pipeline_track("audio", f"{source.name}  ·  {mode}"), flush=True)
+    log(f"Processing {source.name} as {mode}")
+    mp3_path = to_mp3(source)
+    print(viz.pipeline_track("whisper", "on-device transcript"), flush=True)
+    whisper_json = transcribe(mp3_path, diarize=want_diarize(mode))
+    transcript_text = transcript_with_timestamps(whisper_json)
+
+    print(viz.pipeline_track("llm", f"{provider} recap"), flush=True)
+    log(f"Calling {provider} for {mode} recap...")
+    analysis = call_llm(transcript_text, mode)
+
+    print(viz.pipeline_track("notes"), flush=True)
+    recorded_at = datetime.fromtimestamp(source.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    md_path = build_markdown(analysis, source.name, recorded_at, mode)
+    docx_path = build_docx(analysis, source.name, recorded_at, mode)
+    log(f"Wrote {docx_path}")
+    log(f"Wrote {md_path}")
+
+    record, archive_dir = persist_recap(
+        analysis,
+        source,
+        recorded_at,
+        mode,
+        transcript_text,
+        provider,
+        brain_slug=brain_slug,
+        md_path=md_path,
+        docx_path=docx_path,
+    )
+    if brain_slug:
+        log(f"Cortex updated for brain {brain_slug}")
+    keep = brains_mod.keep_source(source, brain_slug)
+    archive_pipeline_outputs(source, mp3_path, archive_dir, keep=keep)
+    log(f"Archived artifacts to {archive_dir}" + (" (original kept)" if keep else ""))
+    print(viz.pipeline_track("done"), flush=True)
+    print(viz.recap_card(analysis, mode, md_path, docx_path), flush=True)
+    notify("CatchMeUp", f"Done: {docx_path.name} is ready in output/")
+
+
+def process_folder(folder: Path, mode: str | None, brain_slug: str | None) -> int:
+    if not brain_slug:
+        log("ERROR: folder ingest needs --brain (./catchup into NAME DIR)")
+        print("Folder ingest needs a brain: ./catchup into mit-60001 MIT-6.0001/", flush=True)
+        return 1
+    brains_mod.load_brain(brain_slug)
+    pending = brains_mod.pending_media(brain_slug, folder)
+    limit = ingest_limit()
+    if limit is not None:
+        pending = pending[:limit]
+    if not pending:
+        print("Nothing new to file (already ingested, or no media in that folder).", flush=True)
+        return 0
+    failed = 0
+    for i, path in enumerate(pending, 1):
+        print(f"\n[{i}/{len(pending)}] {path.name}", flush=True)
+        try:
+            process_recording(path, mode, brain_slug)
+        except Exception:
+            failed += 1
+            log(f"ERROR: {path.name}\n" + traceback.format_exc())
+            notify("CatchMeUp FAILED", f"{path.name} - see logs/pipeline.log")
+            print(f"Failed: {path.name} — continuing", flush=True)
+    if failed:
+        log(f"Folder ingest finished with {failed} failure(s) of {len(pending)}")
+        return 1
+    return 0
 
 
 def parse_args(argv):
@@ -307,11 +700,15 @@ def parse_args(argv):
         prog="catchup",
         description="Turn a meeting or lecture recording into Word notes.",
     )
-    parser.add_argument("recording", help="Path to the video/audio file")
+    parser.add_argument("recording", help="Path to the video/audio file, or a folder of them")
     parser.add_argument(
         "--mode",
         choices=MODES,
         help="meeting (work) or lecture (class). Guessed from the filename if omitted.",
+    )
+    parser.add_argument(
+        "--brain",
+        help="File this recap into a specialist brain folder (./catchup brain new NAME).",
     )
     return parser.parse_args(argv)
 
@@ -319,16 +716,16 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
     load_env()
-    source = Path(args.recording).resolve()
+    source = Path(args.recording).expanduser()
     if not source.exists():
         log(f"ERROR: source file not found: {source}")
         sys.exit(1)
 
-    from providers import active_provider, resolve_api_key
+    brain_slug = (args.brain or "").strip() or None
+    if source.is_dir():
+        sys.exit(process_folder(source, args.mode, brain_slug))
 
-    mode = args.mode or guess_mode(source)
-    if mode not in MODES:
-        mode = "meeting"
+    from providers import active_provider, resolve_api_key
 
     provider = active_provider()
     if not resolve_api_key(provider) and provider != "ollama":
@@ -337,25 +734,7 @@ def main(argv=None):
         sys.exit(1)
 
     try:
-        log(f"Processing {source.name} as {mode}")
-        mp3_path = to_mp3(source)
-        whisper_json = transcribe(mp3_path)
-        transcript_text = transcript_with_timestamps(whisper_json)
-
-        log(f"Calling {provider} for {mode} recap...")
-        analysis = call_llm(transcript_text, mode)
-
-        recorded_at = datetime.fromtimestamp(source.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        docx_path = build_docx(analysis, source.name, recorded_at, mode)
-        log(f"Wrote {docx_path}")
-
-        archive_dir = PROCESSED_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{source.stem}"
-        json_path = mp3_path.with_suffix(".json")
-        srt_path = mp3_path.with_suffix(".srt")
-        archive(source, mp3_path, json_path, srt_path, dest_dir=archive_dir)
-        log(f"Archived source files to {archive_dir}")
-        notify("CatchMeUp", f"Done: {docx_path.name} is ready in output/")
-
+        process_recording(source, args.mode, brain_slug)
     except Exception:
         log("ERROR: pipeline failed\n" + traceback.format_exc())
         notify("CatchMeUp FAILED", f"{source.name} - see logs/pipeline.log")

@@ -64,7 +64,8 @@ Then pick a company for the notes step, and a recap style:
 
 ## Commands
 
-Run `./catchup` with no arguments anytime to reprint this list.
+Run `./catchup` or `./catchup help` anytime for the command list.  
+`./catchup help exam` (or `rec`, `brain`, `clip`, …) prints a short page for that command.
 
 | Command | What it does |
 |---|---|
@@ -80,7 +81,22 @@ Run `./catchup` with no arguments anytime to reprint this list.
 | `./catchup drop FILE` | Copy a file into `recordings/` |
 | `./catchup watch meeting` | Auto-recap new files as meetings |
 | `./catchup watch lecture` | Auto-recap new files as lectures |
-| `./catchup status` / `list` / `logs` / `open` | What’s waiting, notes, log, Finder |
+| `./catchup brain new NAME --lecture\|--meeting` | Create a specialist agent folder |
+| `./catchup into NAME FILE` | Recap a recording **into that brain** |
+| `./catchup ask NAME QUESTION` | RAG over that brain only |
+| `./catchup think NAME TASK` | Deep multi-pass analysis (cortex + critique) |
+| `./catchup exam NAME` | Practice exam from that brain |
+| `./catchup diff NAME` | What changed since the previous recap |
+| `./catchup clip NAME WORDS` | Play the audio of a concept |
+| `./catchup rec` | Record from the mic, then recap |
+| `./catchup cortex NAME` | Show that brain's concept graph |
+| `./catchup mcp install` | Expose brains to Cursor via MCP |
+| `./catchup search WORDS` | Find a topic across meetings + lectures |
+| `./catchup ask QUESTION` | Ask your library |
+| `./catchup quiz` | Flashcards from lecture terms |
+| `./catchup todos` | Action items from all meetings |
+| `./catchup moments` | Timestamps from the latest recap |
+| `./catchup play HH:MM:SS` | Play 25s of that moment |
 | `./catchup install-watch meeting\|lecture` | Background watcher (launchd) |
 
 ---
@@ -114,6 +130,63 @@ Run `./catchup` with no arguments anytime to reprint this list.
 ```
 
 If the filename already says `lecture`, `class`, `week`, `zoom`, `standup`, `1-1`, … CatchMeUp can guess. Passing `meeting` or `lecture` always wins.
+
+---
+
+## After the recap (the unique part)
+
+Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is **named specialist agents**, each bound to a folder of recaps that *you actually missed*:
+
+| Brain folder | Agent | You ask |
+|---|---|---|
+| `brains/cs61a/` | Course TA | “Explain environment diagrams from week 3” |
+| `brains/acme-client/` | Account memory | “What did we promise them about billing?” |
+| `brains/standups/` | Team historian | “Who owns the auth migration?” |
+
+Each brain has a **persona** (how it should think), an **inbox** (drop recordings), and a **recap corpus** the RAG search cannot leave. Cursor talks to the same agents over **MCP**.
+
+```bash
+./catchup brain new cs61a --lecture
+./catchup brain persona cs61a You are a CS 61A TA. Prefer SICP vocabulary.
+./catchup into cs61a ~/Downloads/week3.mp4
+./catchup into mit-60001 MIT-6.0001/    # whole OCW folder; originals stay put
+./catchup ask cs61a what is a binary heap?
+./catchup think cs61a explain mutexes for the midterm
+./catchup exam cs61a
+./catchup clip cs61a mutex
+./catchup rec lecture          # mic → recap (Ctrl-C to stop)
+./catchup diff cs61a
+./catchup cortex cs61a
+./catchup watch cs61a          # anything dropped in brains/cs61a/inbox/
+
+./catchup mcp install          # Cursor: “ask the cs61a brain about heaps”
+```
+
+Otter and Fireflies summarize one call in the cloud. CatchMeUp keeps a **local library** of everything you missed, then you query a *specific* brain from the terminal or from Cursor.
+
+Each recap also writes Markdown and Word into `output/`. Read concepts **in CatchMeUp** — you do not need Obsidian or another notes app:
+
+```bash
+./catchup notes cs61a
+./catchup walk cs61a mutex      # hop around the graph in the terminal
+./catchup graph cs61a           # clickable graph CatchMeUp generates (opens in your browser)
+```
+
+Obsidian is optional: `./catchup obsidian cs61a` dumps a vault folder if you already live there.
+
+**Deep analysis (`./catchup think`)** is four passes, not one chatbot call: decompose the task → fire related concepts in that brain’s cortex (a concept graph that grows as recaps co-occur) → gather cited claims → critique gaps → synthesize. The LLM is the inner voice; the graph is the memory. Inspect it with `./catchup cortex cs61a`.
+
+Meetings get **speaker labels** (WhisperKit diarization) so action items can say `Speaker 1 / Jordan` instead of “someone.” Lectures skip diarization unless you set `CATCHMEUP_DIARIZE=1`.
+
+After a few recaps in a brain:
+
+```bash
+./catchup exam cs61a --print     # practice test from terms + study list
+./catchup diff cs61a             # what appeared / vanished since last time
+./catchup clip cs61a mutex       # jump 25s into the archived audio
+./catchup rec lecture            # record from the mic, Ctrl-C, auto-recap
+./catchup rec --devices
+```
 
 ---
 
@@ -200,3 +273,15 @@ Full traceback lives in `logs/pipeline.log`.
 ```bash
 ./catchup config custom https://your-gateway.example/v1
 ```
+
+---
+
+## Tests
+
+Recaps, brains, and cortex data honor `CATCHMEUP_HOME`, so the suite uses a temp directory and never writes into your real `brains/` or `processed/`.
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+That covers folder brains, isolation, cortex ingest/activate/think (LLM mocked), markdown + library search, MCP tools, and the CLI (`brain new/list/show`, `cortex`, `help`). It does **not** call ffmpeg, whisperkit-cli, or a live LLM — those need a real recording and `./catchup doctor` to go green.

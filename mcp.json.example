@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "catchmeup": {
+      "command": "REPLACE_WITH_ABSOLUTE_PATH/venv/bin/python3",
+      "args": ["REPLACE_WITH_ABSOLUTE_PATH/mcp_server.py"]
+    }
+  }
+}

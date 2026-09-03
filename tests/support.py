@@ -110,8 +110,8 @@ class IsolatedHome(unittest.TestCase):
         os.environ.pop("CATCHMEUP_HOME", None)
 
     def seed_lecture(self, slug: str = "cs61a"):
-        import brains
-        import cortex
+        from catchmeup import brains
+        from catchmeup import cortex
 
         if not brains.exists(slug):
             brains.create_brain(slug, kind="lecture")
@@ -134,8 +134,8 @@ class IsolatedHome(unittest.TestCase):
         return rec
 
     def seed_meeting(self, slug: str = "acme-client"):
-        import brains
-        import cortex
+        from catchmeup import brains
+        from catchmeup import cortex
 
         if not brains.exists(slug):
             brains.create_brain(slug, kind="meeting")
@@ -156,8 +156,8 @@ class IsolatedHome(unittest.TestCase):
         return rec
 
     def seed_lecture_week4(self, slug: str = "cs61a"):
-        import brains
-        import cortex
+        from catchmeup import brains
+        from catchmeup import cortex
 
         if not brains.exists(slug):
             brains.create_brain(slug, kind="lecture")

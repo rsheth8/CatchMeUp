@@ -16,13 +16,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
+from . import brains as brains_mod
+from .paths import RECORD_NAME
 
-import brains as brains_mod
-
-RECORD_NAME = "catchmeup.json"
 MAX_ASK_CHARS = 48000
 
 
@@ -246,7 +242,7 @@ def cmd_ask(question: str, mode: str | None, brain: str | None = None):
         "If the library does not contain the answer, say so — do not invent.\n\n"
         f"Question: {question}\n\nLibrary:\n{context}"
     )
-    from providers import complete_text
+    from .providers import complete_text
 
     print(complete_text(prompt, log=lambda m: print(f"[{m}]", file=sys.stderr)))
 
@@ -262,8 +258,8 @@ def _terms_from(rec: dict) -> list[tuple[str, str]]:
     return cards
 
 
-def cmd_quiz(mode: str | None, count: int):
-    rows = list_records(mode or "lecture") or list_records(None)
+def cmd_quiz(mode: str | None, count: int, brain: str | None = None):
+    rows = list_records(mode or "lecture", brain=brain) or list_records(None, brain=brain)
     cards = []
     for rec in rows:
         for term, definition in _terms_from(rec):
@@ -271,9 +267,14 @@ def cmd_quiz(mode: str | None, count: int):
     if not cards:
         print("No terms yet. Recap a lecture first: ./catchup lecture FILE")
         sys.exit(1)
-    random.shuffle(cards)
-    cards = cards[: max(1, count)]
-    import viz
+    from . import exam as exam_mod
+
+    if brain:
+        cards = exam_mod.order_quiz_cards(cards, brain, count)
+    else:
+        random.shuffle(cards)
+        cards = cards[: max(1, count)]
+    from . import viz
 
     print(f"Quiz — {len(cards)} cards from your library. Enter = reveal. q = quit.\n")
     correctish = 0
@@ -287,18 +288,26 @@ def cmd_quiz(mode: str | None, count: int):
         if typed.lower() in {"q", "quit"}:
             break
         print(f"         → {definition or '(no definition stored)'}")
-        if typed and definition and typed.lower() in definition.lower():
-            correctish += 1
-            print("         (looks close)")
+        if typed and definition:
+            fake_q = {"prompt": f"Define: {term}", "answer": definition, "kind": "term"}
+            result = exam_mod.grade_answer(fake_q, typed)
+            if result["verdict"] == "pass":
+                correctish += 1
+                print("         (looks close)")
+            if brain:
+                exam_mod.record_attempt(brain, fake_q, result["verdict"])
         print()
-    print("Done. Ask a follow-up with: ./catchup ask explain <topic>")
+    print("Done. Misses stick around:  ./catchup drill " + (brain or "<brain>"))
 
 
-def cmd_todos(mode: str | None):
-    rows = list_records(mode or "meeting")
+def cmd_todos(mode: str | None, brain: str | None = None):
+    rows = list_records(mode or "meeting", brain=brain)
     items = []
     for rec in rows:
-        for item in (rec.get("analysis") or {}).get("action_items") or []:
+        analysis = rec.get("analysis") or {}
+        slug = rec.get("brain") or brain
+        mapped = brains_mod.apply_speaker_map(slug, analysis) if slug else analysis
+        for item in mapped.get("action_items") or []:
             items.append((rec.get("title") or rec.get("source"), rec.get("recorded_at"), str(item)))
     if not items:
         print("No action items in the library yet. Recap a meeting: ./catchup meeting FILE")
@@ -321,7 +330,7 @@ def cmd_moments(mode: str | None):
     if not bookmarks:
         print("No timestamps stored for this recap.")
         return
-    import viz
+    from . import viz
 
     track = viz.timeline(bookmarks)
     if track:
@@ -363,8 +372,11 @@ def recap_audio(rec: dict) -> Path | None:
     return None
 
 
-def play_range(audio: Path, start: float, duration: float = 25) -> None:
-    """Cut 25s with ffmpeg, then afplay a real file. `afplay -` (stdin) fails on macOS."""
+def play_range(audio: Path, start: float, duration: float = 25) -> str:
+    """Cut 25s with ffmpeg, then afplay a real file. `afplay -` (stdin) fails on macOS.
+
+    Returns 'ok', 'stopped' (Ctrl-C), or 'error'.
+    """
     ffmpeg = shutil.which("ffmpeg") or ""
     if not ffmpeg:
         bundled = Path("/opt/homebrew/bin/ffmpeg")
@@ -372,10 +384,10 @@ def play_range(audio: Path, start: float, duration: float = 25) -> None:
     if not ffmpeg:
         print("ffmpeg not found — open the file yourself:")
         print(f"  {audio}")
-        return
+        return "error"
     if not Path(audio).exists():
         print(f"Audio missing: {audio}")
-        return
+        return "error"
     afplay = shutil.which("afplay")
     tmp = ""
     try:
@@ -395,10 +407,13 @@ def play_range(audio: Path, start: float, duration: float = 25) -> None:
             print("afplay not found — extracted clip:")
             print(f"  {tmp}")
             tmp = ""
+        return "ok"
     except subprocess.CalledProcessError:
         print(f"Could not extract a clip from {audio}")
+        return "error"
     except KeyboardInterrupt:
         print()
+        return "stopped"
     finally:
         if tmp:
             Path(tmp).unlink(missing_ok=True)
@@ -419,45 +434,62 @@ def _recap_for_episode(slug: str, episode: str) -> dict | None:
     return fallback
 
 
-def _clip_from_cortex(slug: str, query: str) -> dict | None:
-    """Play the first time this concept was heard, not a later passing mention."""
-    import cortex as cortex_mod
+def _clip_from_moment(rec: dict, moment: dict, concept: str = "") -> dict:
+    ts = str(moment.get("timestamp") or "")
+    return {
+        "rec": rec,
+        "heading": moment.get("heading") or concept,
+        "insight": moment.get("insight") or "",
+        "timestamp": ts or "00:00:00",
+        "start": _parse_ts(ts) if ts else 0.0,
+        "audio": recap_audio(rec),
+        "score": 100.0,
+        "concept": concept,
+        "episode": moment.get("episode") or rec.get("title") or "",
+    }
+
+
+def clips_from_cortex(slug: str, query: str) -> list[dict]:
+    """Every timestamp this concept was heard, in lecture order."""
+    from . import cortex as cortex_mod
 
     try:
         graph = cortex_mod.load_cortex(slug)
     except FileNotFoundError:
-        return None
+        return []
     nid = cortex_mod.find_node(graph, query)
     if not nid:
-        return None
+        return []
     node = (graph.get("nodes") or {}).get(nid) or {}
     moments = [m for m in (node.get("moments") or []) if str(m.get("timestamp") or "").strip()]
-    if not moments:
-        return None
-    moment = moments[0]
-    rec = _recap_for_episode(slug, str(moment.get("episode") or ""))
-    if not rec:
-        for ep in node.get("episodes") or []:
-            rec = _recap_for_episode(slug, str(ep))
-            if rec:
-                break
-    if not rec:
-        return None
-    ts = str(moment.get("timestamp") or "")
-    return {
-        "rec": rec,
-        "heading": moment.get("heading") or nid,
-        "insight": moment.get("insight") or "",
-        "timestamp": ts,
-        "start": _parse_ts(ts),
-        "audio": recap_audio(rec),
-        "score": 100.0,
-        "concept": nid,
-    }
+    out = []
+    seen = set()
+    for moment in moments:
+        rec = _recap_for_episode(slug, str(moment.get("episode") or ""))
+        if not rec:
+            for ep in node.get("episodes") or []:
+                rec = _recap_for_episode(slug, str(ep))
+                if rec:
+                    break
+        if not rec:
+            continue
+        hit = _clip_from_moment(rec, moment, concept=nid)
+        key = (hit["timestamp"], hit.get("heading"), str(rec.get("source") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(hit)
+    out.sort(key=lambda h: (h.get("start") or 0.0, h.get("heading") or ""))
+    return out
+
+
+def _clip_from_cortex(slug: str, query: str) -> dict | None:
+    clips = clips_from_cortex(slug, query)
+    return clips[0] if clips else None
 
 
 def find_clip(query: str, mode: str | None = None, brain: str | None = None, records: list | None = None) -> dict | None:
-    from brains import _tokens
+    from .brains import _tokens
 
     needles = _tokens(query)
     if not needles:
@@ -516,6 +548,15 @@ def find_clip(query: str, mode: str | None = None, brain: str | None = None, rec
     return best
 
 
+def list_clips(query: str, mode: str | None = None, brain: str | None = None, records: list | None = None) -> list[dict]:
+    if brain and records is None:
+        clips = clips_from_cortex(brain, query)
+        if clips:
+            return clips
+    hit = find_clip(query, mode=mode, brain=brain, records=records)
+    return [hit] if hit else []
+
+
 def cmd_play(timestamp: str, mode: str | None, brain: str | None = None):
     if not timestamp:
         print("Usage: ./catchup play HH:MM:SS")
@@ -536,36 +577,84 @@ def cmd_play(timestamp: str, mode: str | None, brain: str | None = None):
     play_range(audio, start)
 
 
-def cmd_clip(query: str, mode: str | None, brain: str | None = None, dry: bool = False):
-    if not query.strip():
-        print("Usage: ./catchup clip [brain] <words>")
-        sys.exit(1)
-    hit = find_clip(query, mode=mode, brain=brain)
-    if not hit:
-        print(f"No bookmark or term matched {query!r}.")
-        print("Try: ./catchup search " + query)
-        sys.exit(1)
+def _print_clip(hit: dict, index: int, total: int) -> None:
     rec = hit["rec"]
     title = rec.get("title") or rec.get("source")
     ts = hit["timestamp"]
-    print(title)
+    where = f"{index}/{total}" if total > 1 else ""
+    prefix = f"[{where}] " if where else ""
+    print(f"{prefix}{title}")
     src = rec.get("source") or ""
     if src and src != title:
         print(f"  {src}")
     print(f"  [{ts}] {hit['heading']}")
     if hit.get("insight"):
         print(f"      {hit['insight']}")
-    audio = hit.get("audio")
+
+
+def cmd_clip(query: str, mode: str | None, brain: str | None = None, dry: bool = False):
+    if not query.strip():
+        print("Usage: ./catchup clip [brain] <words>")
+        sys.exit(1)
+    clips = list_clips(query, mode=mode, brain=brain)
+    if not clips:
+        print(f"No bookmark or term matched {query!r}.")
+        print("Try: ./catchup search " + query)
+        sys.exit(1)
     if dry or os.environ.get("CATCHMEUP_NO_AUDIO"):
-        if audio:
-            print(f"  audio: {audio}")
+        for i, hit in enumerate(clips, 1):
+            _print_clip(hit, i, len(clips))
+            audio = hit.get("audio")
+            if audio:
+                print(f"  audio: {audio}")
+        if len(clips) > 1:
+            print(f"\n{len(clips)} moments. Play them:  ./catchup clip {brain or ''} {query}".replace("  ", " "))
         return
-    if not audio:
-        print("No archived audio for that recap. Timestamp is above.")
-        print(f"  ./catchup play {ts}")
-        return
-    print(f"Playing 25s from {ts}…")
-    play_range(audio, hit["start"])
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and len(clips) > 1
+    i = 0
+    while 0 <= i < len(clips):
+        hit = clips[i]
+        _print_clip(hit, i + 1, len(clips))
+        audio = hit.get("audio")
+        if not audio:
+            print("No archived audio for that recap. Timestamp is above.")
+            print(f"  ./catchup play {hit['timestamp']}")
+        else:
+            print(f"Playing 25s from {hit['timestamp']}…")
+            if interactive:
+                print("  n next · p prev · w walk · enter replay · q quit   (Ctrl-C = next)")
+            status = play_range(audio, hit["start"])
+            if interactive and status == "stopped":
+                i = (i + 1) % len(clips)
+                continue
+        if not interactive:
+            if len(clips) > 1:
+                print(f"\n{len(clips)} moments. Replay with n/p in a terminal, or --print to list them.")
+            return
+        try:
+            raw = input("clip> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if raw in {"q", "quit", "exit"}:
+            return
+        if raw in {"n", "next", "+", "j"}:
+            i = (i + 1) % len(clips)
+            continue
+        if raw in {"p", "prev", "-", "k"}:
+            i = (i - 1) % len(clips)
+            continue
+        if raw in {"w", "walk"} and brain and hit.get("concept"):
+            from . import cortex as cortex_mod
+            cortex_mod.run_walk(brain, hit["concept"])
+            continue
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(clips):
+                i = idx
+            continue
+        # enter / unknown → replay same clip
+        continue
 
 
 def _norm_set(items) -> set[str]:
@@ -690,9 +779,9 @@ def main(argv=None):
     elif args.cmd == "ask":
         cmd_ask(" ".join(args.question), mode, brain=brain)
     elif args.cmd == "quiz":
-        cmd_quiz(mode, args.count)
+        cmd_quiz(mode, args.count, brain=brain)
     elif args.cmd == "todos":
-        cmd_todos(mode)
+        cmd_todos(mode, brain=brain)
     elif args.cmd == "moments":
         cmd_moments(mode)
     elif args.cmd == "play":

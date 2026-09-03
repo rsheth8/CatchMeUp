@@ -1,3 +1,0 @@
-#!/bin/bash
-# Old command name. CatchMeUp now uses ./catchup
-exec "$(cd "$(dirname "$0")" && pwd)/catchup" "$@"

@@ -15,8 +15,8 @@ import sys
 from collections import defaultdict, deque
 from pathlib import Path
 
-import brains
-from providers import complete_json, complete_text
+from . import brains
+from .providers import complete_json, complete_text
 
 CORTEX_FILE = "cortex.json"
 
@@ -39,6 +39,21 @@ EDGE_LABEL = {
     "exam": "exam",
     "owns": "owns",
 }
+# Single-word hubs that show up in every CS lecture and drown the graph.
+GENERIC_HUBS = {
+    "class", "classes", "method", "methods", "function", "functions",
+    "object", "objects", "variable", "variables", "value", "values",
+    "code", "example", "examples", "python", "program", "programs",
+    "data", "type", "types", "item", "items", "self", "none",
+    "return", "print", "input", "output", "file", "files", "error",
+    "errors", "test", "tests", "loop", "loops", "list", "lists",
+    "string", "strings", "number", "numbers", "true", "false",
+    "thing", "things", "way", "case", "cases", "part", "parts",
+}
+_QUESTION_HEAD = re.compile(
+    r"^(what|why|how|when|where|explain|describe|discuss|compare)\b",
+    re.I,
+)
 
 
 def empty_cortex() -> dict:
@@ -209,6 +224,23 @@ def _add_moment(node: dict, timestamp: str, heading: str, episode: str, insight:
     node["moments"] = moments[-12:]
 
 
+def is_generic_hub(nid: str) -> bool:
+    return _norm(nid) in GENERIC_HUBS
+
+
+def _keep_moment_node(heading: str) -> bool:
+    """Bookmark titles become neurons only when they look like a concept name."""
+    h = (heading or "").strip()
+    if not h or len(h) > 48:
+        return False
+    words = h.split()
+    if len(words) > 6 or h.endswith("?"):
+        return False
+    if _QUESTION_HEAD.match(h):
+        return False
+    return True
+
+
 def _mentioned(text: str, term_ids: list[str]) -> list[str]:
     blob = _norm(text)
     if not blob:
@@ -218,9 +250,24 @@ def _mentioned(text: str, term_ids: list[str]) -> list[str]:
         if not tid:
             continue
         stem = _deplural(tid) or tid
-        if tid in blob or (stem != tid and stem in blob):
+        pattern = re.escape(tid)
+        if stem != tid:
+            pattern = rf"(?:{pattern}|{re.escape(stem)})"
+        if re.search(rf"(?:^|\s){pattern}(?:es|s)?(?:\s|$)", blob):
             hits.append(tid)
     return hits
+
+
+def _add_exam_prompt(node: dict, item: str) -> None:
+    if not node:
+        return
+    text = re.sub(r"\s+", " ", str(item or "").strip())[:240]
+    if not text:
+        return
+    prompts = node.setdefault("exam_prompts", [])
+    if text not in prompts:
+        prompts.append(text)
+        node["exam_prompts"] = prompts[-8:]
 
 
 def ingest_recap(slug: str, rec: dict) -> dict:
@@ -237,24 +284,20 @@ def ingest_recap(slug: str, rec: dict) -> dict:
         elif term:
             names.append((str(term), "term", ""))
     for bm in analysis.get("bookmarks") or []:
-        if isinstance(bm, dict) and bm.get("heading"):
+        if isinstance(bm, dict) and bm.get("heading") and _keep_moment_node(str(bm["heading"])):
             names.append((bm["heading"], "moment", str(bm.get("insight") or "")))
     for section in analysis.get("detailed_notes") or []:
         if isinstance(section, dict) and section.get("heading"):
             names.append((section["heading"], "topic", str(section.get("content") or "")[:240]))
     for item in analysis.get("action_items") or []:
         names.append((str(item)[:80], "action", str(item)))
-    for item in analysis.get("study") or []:
-        names.append((str(item)[:80], "study", str(item)))
     for sp in analysis.get("speakers") or []:
         if isinstance(sp, dict):
             label = sp.get("name") or sp.get("label")
-            if label:
+            if label and str(label).strip().lower() not in {"unknown", "n/a", "none", "?"}:
                 names.append((str(label), "person", str(sp.get("said") or "")))
         elif sp:
             names.append((str(sp)[:80], "person", ""))
-    if rec.get("title"):
-        names.append((rec["title"], "episode", episode))
 
     seen: list[str] = []
     kinds_by_id: dict[str, str] = {}
@@ -286,9 +329,13 @@ def ingest_recap(slug: str, rec: dict) -> dict:
                 _bump_edge(cortex, moment_id, tid, episode, kind="heard-at", when=when)
 
     for item in analysis.get("study") or []:
-        sid = resolve_id(cortex, str(item)[:80])
-        for tid in _mentioned(str(item), term_ids):
-            _bump_edge(cortex, sid, tid, episode, kind="exam", when=when)
+        mentioned = _mentioned(str(item), term_ids)
+        for tid in mentioned:
+            if tid in cortex["nodes"]:
+                _add_exam_prompt(cortex["nodes"][tid], str(item))
+        for i, a in enumerate(mentioned):
+            for b in mentioned[i + 1 :]:
+                _bump_edge(cortex, a, b, episode, kind="exam", when=when)
 
     people = [nid for nid, k in kinds_by_id.items() if k == "person"]
     actions = [nid for nid, k in kinds_by_id.items() if k == "action"]
@@ -302,7 +349,8 @@ def ingest_recap(slug: str, rec: dict) -> dict:
     hubs = [
         nid for nid in seen
         if (cortex["nodes"].get(nid) or {}).get("kind") in HUB_KINDS
-    ][:14]
+        and not is_generic_hub(nid)
+    ][:10]
     for i, a in enumerate(hubs):
         for b in hubs[i + 1 :]:
             _bump_edge(cortex, a, b, episode, kind="with", when=when)
@@ -310,7 +358,7 @@ def ingest_recap(slug: str, rec: dict) -> dict:
     save_cortex(slug, cortex)
     write_cortex_index(slug, cortex)
     write_concept_notes(slug, cortex)
-    import graph as graph_mod
+    from . import graph as graph_mod
     graph_mod.write_graph(slug, cortex)
     return cortex
 
@@ -323,7 +371,7 @@ def rebuild(slug: str) -> dict:
     cortex = load_cortex(slug)
     write_cortex_index(slug, cortex)
     write_concept_notes(slug, cortex)
-    import graph as graph_mod
+    from . import graph as graph_mod
     graph_mod.write_graph(slug, cortex)
     return cortex
 
@@ -536,7 +584,7 @@ def think(slug: str, question: str, log=print) -> str:
         log("Building cortex from recaps...")
         rebuild(slug)
 
-    import viz
+    from . import viz
 
     log(viz.pass_line(1, 4, "decompose the task"))
     plan = complete_json(
@@ -611,7 +659,7 @@ def format_cortex(slug: str, limit: int = 30, query: str | None = None) -> str:
     )
     if not nodes:
         return f"Cortex for `{slug}` is empty. File recaps, then: ./catchup cortex {slug}"
-    import viz
+    from . import viz
 
     fired = activate(slug, query, hops=2, top=min(14, limit)) if query else []
     fired_ids = {n["id"] for n in fired}
@@ -640,6 +688,8 @@ def _should_note(node: dict) -> bool:
     nid = node.get("id") or ""
     kind = node.get("kind") or ""
     if kind not in NOTE_KINDS:
+        return False
+    if is_generic_hub(nid):
         return False
     if len(nid) < 2 or len(nid) > 60:
         return False
@@ -689,6 +739,12 @@ def render_concept_note(slug: str, nid: str, cortex: dict) -> str:
             lines.append(f"- **[{ts}] {heading}** — {ep}")
             if m.get("insight"):
                 lines.append(f"  {m['insight']}")
+        lines.append("")
+    exam_prompts = node.get("exam_prompts") or []
+    if exam_prompts:
+        lines += ["## Exam", ""]
+        for prompt in exam_prompts:
+            lines.append(f"- {prompt}")
         lines.append("")
     episodes = node.get("episodes") or []
     if episodes:
@@ -740,7 +796,7 @@ def format_walk(slug: str, query: str | None = None) -> str:
     if not nodes:
         return f"Cortex for `{slug}` is empty. File recaps, then: ./catchup walk {slug} <concept>"
     if not (query or "").strip():
-        import viz
+        from . import viz
         top = sorted(nodes.values(), key=lambda n: -int(n.get("weight") or 0))[:12]
         lines = [f"Walk `{slug}` — pick a neuron:", ""]
         for node in top:
@@ -757,7 +813,7 @@ def format_walk(slug: str, query: str | None = None) -> str:
             f"  ./catchup cortex {slug}\n"
             f"  ./catchup walk {slug}\n"
         )
-    import viz
+    from . import viz
 
     node = nodes[nid]
     links = synapses(cortex, nid)
@@ -767,6 +823,12 @@ def format_walk(slug: str, query: str | None = None) -> str:
         "",
         viz.walk_card(node, links, slug),
     ]
+    exam_prompts = node.get("exam_prompts") or []
+    if exam_prompts:
+        chunks.append("")
+        chunks.append("exam")
+        for prompt in exam_prompts[:4]:
+            chunks.append(f"  • {prompt}")
     moments = node.get("moments") or []
     if moments:
         chunks.append("")
@@ -802,7 +864,7 @@ def format_trace(slug: str, src: str, dst: str) -> str:
             f"No path from `{a}` to `{b}` in `{slug}`.\n"
             f"They have not fired together yet."
         )
-    import viz
+    from . import viz
     return viz.trace_path(hops, slug)
 
 
@@ -815,7 +877,7 @@ def format_notes(slug: str) -> str:
     )
     if not nodes:
         return f"No notes in `{slug}` yet. Recap into this brain first."
-    import viz
+    from . import viz
 
     return viz.notes_table(
         slug,
@@ -852,7 +914,7 @@ def run_walk(slug: str, start: str | None = None) -> None:
             return
         low = raw.lower()
         if low in {"graph", "map"}:
-            import graph as graph_mod
+            from . import graph as graph_mod
             path = graph_mod.open_graph(slug, current)
             print(f"  opened {path}" if graph_mod.should_open() else f"  wrote {path}")
             continue
@@ -866,7 +928,7 @@ def run_walk(slug: str, start: str | None = None) -> None:
                 current = history.pop()
             continue
         if low == "clip" and current:
-            import library
+            from . import library
             library.cmd_clip(current, None, brain=slug)
             continue
         if raw.isdigit() and current:

@@ -10,14 +10,9 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
-
-import brains
-import library
+from . import brains
+from . import library
 
 PROTOCOL = "2024-11-05"
 SERVER = {"name": "catchmeup", "version": "1.0.0"}
@@ -144,6 +139,29 @@ TOOLS = [
             "required": ["brain", "from", "to"],
         },
     },
+    {
+        "name": "grade_work",
+        "description": (
+            "Grade a student's homework, code, or written answer using ONLY that "
+            "brain's recaps. Cite timestamps. Use for problem sets and 'does this "
+            "match lecture 3?' — not for a lookup (use ask_brain)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "brain": {"type": "string"},
+                "work": {
+                    "type": "string",
+                    "description": "The student's code, proof, or written answer.",
+                },
+                "assignment": {
+                    "type": "string",
+                    "description": "Optional prompt or filename for the assignment.",
+                },
+            },
+            "required": ["brain", "work"],
+        },
+    },
 ]
 
 
@@ -209,7 +227,7 @@ def _handle_tool(name: str, args: dict) -> dict:
         question = (args.get("question") or "").strip()
         if not slug or not question:
             return _result_text("Need brain slug and question.")
-        import cortex
+        from . import cortex
         try:
             answer = cortex.think(slug, question, log=lambda *_: None)
         except FileNotFoundError as e:
@@ -253,7 +271,7 @@ def _handle_tool(name: str, args: dict) -> dict:
         concept = (args.get("concept") or "").strip()
         if not slug:
             return _result_text("Need brain slug.")
-        import cortex
+        from . import cortex
         try:
             brains.load_brain(slug)
         except FileNotFoundError as e:
@@ -265,12 +283,23 @@ def _handle_tool(name: str, args: dict) -> dict:
         dst = (args.get("to") or "").strip()
         if not slug or not src or not dst:
             return _result_text("Need brain, from, and to.")
-        import cortex
+        from . import cortex
         try:
             brains.load_brain(slug)
         except FileNotFoundError as e:
             return _result_text(str(e))
         return _result_text(cortex.format_trace(slug, src, dst))
+    if name == "grade_work":
+        slug = (args.get("brain") or "").strip()
+        work = (args.get("work") or "").strip()
+        assignment = (args.get("assignment") or "").strip()
+        if not slug or not work:
+            return _result_text("Need brain slug and the student's work.")
+        try:
+            answer = brains.grade_work(slug, work, assignment=assignment, log=lambda *_: None)
+        except FileNotFoundError as e:
+            return _result_text(str(e))
+        return _result_text(answer)
     return _result_text(f"Unknown tool: {name}")
 
 

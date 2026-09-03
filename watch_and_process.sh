@@ -1,5 +1,5 @@
 #!/bin/bash
-# Finds fully-written recordings and runs pipeline.py.
+# Finds fully-written recordings and runs catchmeup.pipeline.
 # Usage: watch_and_process.sh [meeting|lecture] [brain-slug]
 set -u
 
@@ -41,6 +41,7 @@ if [[ -z "$PYTHON" || ! -x "$PYTHON" ]]; then
 fi
 
 export CATCHMEUP_HOME="$DATA_DIR"
+export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 shopt -s nullglob
 for f in "$RECORDINGS_DIR"/*.mov "$RECORDINGS_DIR"/*.mp4 "$RECORDINGS_DIR"/*.m4a \
@@ -63,5 +64,5 @@ for f in "$RECORDINGS_DIR"/*.mov "$RECORDINGS_DIR"/*.mp4 "$RECORDINGS_DIR"/*.m4a
     args=()
     [[ -n "$MODE" ]] && args+=(--mode "$MODE")
     [[ -n "$BRAIN" ]] && args+=(--brain "$BRAIN")
-    "$PYTHON" "$PROJECT_DIR/pipeline.py" "${args[@]}" "$f" >> "$DATA_DIR/logs/pipeline.log" 2>&1
+    "$PYTHON" -m catchmeup.pipeline "${args[@]}" "$f" >> "$DATA_DIR/logs/pipeline.log" 2>&1
 done

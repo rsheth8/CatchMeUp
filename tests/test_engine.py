@@ -4,13 +4,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import brains
-import cortex
-import library
-import pipeline
-from providers import (
+from catchmeup import brains
+from catchmeup import cortex
+from catchmeup import library
+from catchmeup import mcp as mcp_server
+from catchmeup import pipeline
+from catchmeup.providers import (
     active_provider,
     normalize_provider,
+    openai_extra_body,
     parse_json_payload,
     resolve_api_key,
 )
@@ -123,8 +125,8 @@ class CortexTests(IsolatedHome):
                 "2. It connects to environment diagrams in this brain.\n"
             )
 
-        with patch("cortex.complete_json", side_effect=fake_json), patch(
-            "cortex.complete_text", side_effect=fake_text
+        with patch("catchmeup.cortex.complete_json", side_effect=fake_json), patch(
+            "catchmeup.cortex.complete_text", side_effect=fake_text
         ):
             out = cortex.think("cs61a", "explain mutexes for the midterm", log=lambda *_: None)
         self.assertIn("mutex", out.lower())
@@ -175,6 +177,35 @@ class CortexTests(IsolatedHome):
         self.assertIn("mutex", traced.lower())
         missing = cortex.format_walk("cs61a", "bananas-xyz")
         self.assertIn("matched", missing.lower())
+
+    def test_ingest_skips_sentence_bookmarks_and_study_prompts(self):
+        self.seed_lecture("cs61a")
+        rec = {
+            "title": "Week 3 extra",
+            "source": "extra.mp4",
+            "recorded_at": "2026-02-11 09:00",
+            "analysis": {
+                "terms": [{"term": "mutex", "definition": "a lock"}],
+                "bookmarks": [{
+                    "timestamp": "00:01:00",
+                    "heading": "What is a mutex and why does it matter on the exam?",
+                    "insight": "Acquire a mutex before touching shared state.",
+                }],
+                "study": ["Draw an environment diagram for nested define."],
+                "detailed_notes": [],
+            },
+        }
+        cortex.ingest_recap("cs61a", rec)
+        graph = cortex.load_cortex("cs61a")
+        self.assertNotIn(
+            "what is a mutex and why does it matter on the exam?",
+            graph["nodes"],
+        )
+        self.assertFalse(any("draw an environment" in k for k in graph["nodes"]))
+        mutex = graph["nodes"]["mutex"]
+        self.assertTrue(any(m.get("timestamp") == "00:01:00" for m in mutex.get("moments") or []))
+        env = graph["nodes"]["environment diagram"]
+        self.assertTrue(any("nested define" in p.lower() for p in env.get("exam_prompts") or []))
 
     def test_alias_merges_plural(self):
         self.seed_lecture("cs61a")
@@ -293,6 +324,19 @@ class PipelineTests(IsolatedHome):
         pending = [p.name for p in brains.pending_media("mit-60001", corpus)]
         self.assertEqual(pending, ["02 - clip.mp4"])
 
+    def test_media_files_walks_nested_week_folders(self):
+        brains.create_brain("os", kind="lecture")
+        root = self.home / "course"
+        week = root / "week-3"
+        week.mkdir(parents=True)
+        (week / "lecture.mp4").write_bytes(b"a")
+        hidden = root / ".hidden"
+        hidden.mkdir()
+        (hidden / "nope.mp4").write_bytes(b"x")
+        (root / ".DS_Store").write_text("x")
+        names = [p.name for p in brains.media_files(root)]
+        self.assertEqual(names, ["lecture.mp4"])
+
     def test_persist_without_brain_goes_to_processed(self):
         source = self.home / "standup.mov"
         source.write_text("fake")
@@ -360,6 +404,20 @@ class ProviderTests(IsolatedHome):
         self.addCleanup(self._restore_env, "CATCHMEUP_API_KEY", previous_cm)
         self.assertEqual(resolve_api_key("anthropic"), "")
 
+    def test_ollama_extra_body_skips_thinking(self):
+        import os
+
+        self.assertIsNone(openai_extra_body("anthropic"))
+        previous_think = os.environ.get("CATCHMEUP_OLLAMA_THINK")
+        previous_ctx = os.environ.get("CATCHMEUP_NUM_CTX")
+        os.environ.pop("CATCHMEUP_OLLAMA_THINK", None)
+        os.environ.pop("CATCHMEUP_NUM_CTX", None)
+        self.addCleanup(self._restore_env, "CATCHMEUP_OLLAMA_THINK", previous_think)
+        self.addCleanup(self._restore_env, "CATCHMEUP_NUM_CTX", previous_ctx)
+        body = openai_extra_body("ollama")
+        self.assertEqual(body["reasoning_effort"], "none")
+        self.assertEqual(body["options"]["num_ctx"], 32768)
+
     def _restore_env(self, key: str, previous: str | None) -> None:
         import os
 
@@ -371,20 +429,16 @@ class ProviderTests(IsolatedHome):
 
 class McpTests(IsolatedHome):
     def test_initialize_and_tools(self):
-        import mcp_server
-
         init = mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
         self.assertEqual(init["result"]["protocolVersion"], mcp_server.PROTOCOL)
         listed = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in listed["result"]["tools"]}
         self.assertGreaterEqual(
             names,
-            {"list_brains", "ask_brain", "search_brain", "think_brain", "list_recaps", "diff_brain", "walk_brain", "trace_brain"},
+            {"list_brains", "ask_brain", "search_brain", "think_brain", "list_recaps", "diff_brain", "walk_brain", "trace_brain", "grade_work"},
         )
 
     def test_list_brains_and_search(self):
-        import mcp_server
-
         self.seed_lecture("cs61a")
         reply = mcp_server.handle(
             {
@@ -420,8 +474,6 @@ class McpTests(IsolatedHome):
         self.assertIn("Week 3", recaps["result"]["content"][0]["text"])
 
     def test_think_brain_mocked(self):
-        import mcp_server
-
         self.seed_lecture("cs61a")
 
         def fake_json(prompt, log=print):
@@ -431,8 +483,8 @@ class McpTests(IsolatedHome):
                 return {"claims": [{"claim": "lock", "because": "lec", "source": "w3", "confidence": "high"}], "missing": []}
             return {"tensions": [], "gaps": [], "exam_or_action": []}
 
-        with patch("cortex.complete_json", side_effect=fake_json), patch(
-            "cortex.complete_text", return_value="A mutex is a lock."
+        with patch("catchmeup.cortex.complete_json", side_effect=fake_json), patch(
+            "catchmeup.cortex.complete_text", return_value="A mutex is a lock."
         ):
             reply = mcp_server.handle(
                 {
@@ -447,9 +499,27 @@ class McpTests(IsolatedHome):
             )
         self.assertIn("mutex", reply["result"]["content"][0]["text"].lower())
 
-    def test_unknown_method(self):
-        import mcp_server
+    def test_grade_work_mocked(self):
+        self.seed_lecture("cs61a")
+        with patch("catchmeup.providers.complete_text", return_value="Verdict: partial — mention acquire."):
+            reply = mcp_server.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "grade_work",
+                        "arguments": {
+                            "brain": "cs61a",
+                            "work": "A mutex is a lock.",
+                            "assignment": "define mutex",
+                        },
+                    },
+                }
+            )
+        self.assertIn("partial", reply["result"]["content"][0]["text"].lower())
 
+    def test_unknown_method(self):
         reply = mcp_server.handle({"jsonrpc": "2.0", "id": 9, "method": "nope"})
         self.assertEqual(reply["error"]["code"], -32601)
 

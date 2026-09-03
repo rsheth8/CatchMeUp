@@ -6,13 +6,23 @@ Asking that brain RAG-searches only its folder, then answers in character.
 from __future__ import annotations
 
 import json
-import os
+import math
 import re
 from datetime import datetime
 from pathlib import Path
 
-CODE_DIR = Path(__file__).resolve().parent
-RECORD_NAME = "catchmeup.json"
+from .paths import (
+    RECORD_NAME,
+    brains_root,
+    home,
+    load_env,
+    logs_root,
+    output_root,
+    processed_root,
+    recordings_root,
+)
+
+# home / load_env / *_root stay on this module so `brains.home()` still works.
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 MEDIA_SUFFIXES = {".mov", ".mp4", ".m4a", ".mp3", ".wav", ".aac", ".mkv", ".webm"}
@@ -36,45 +46,6 @@ DEFAULT_PERSONAS = {
         "If it was not discussed here, say so."
     ),
 }
-
-
-def home() -> Path:
-    return Path(os.environ.get("CATCHMEUP_HOME") or CODE_DIR)
-
-
-def brains_root() -> Path:
-    return home() / "brains"
-
-
-def processed_root() -> Path:
-    return home() / "processed"
-
-
-def output_root() -> Path:
-    return home() / "output"
-
-
-def logs_root() -> Path:
-    return home() / "logs"
-
-
-def recordings_root() -> Path:
-    return home() / "recordings"
-
-
-def load_env() -> None:
-    seen: set[Path] = set()
-    for path in (home() / ".env", CODE_DIR / ".env"):
-        resolved = path.resolve() if path.exists() else path
-        if resolved in seen or not path.is_file():
-            continue
-        seen.add(resolved)
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), value.strip())
 
 
 def slugify(name: str) -> str:
@@ -156,6 +127,7 @@ def create_brain(name: str, kind: str = "lecture", persona: str | None = None) -
         "slug": slug,
         "kind": kind,
         "persona": (persona or DEFAULT_PERSONAS[kind]).strip(),
+        "speakers": {},
         "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
     brain_meta_path(slug).write_text(json.dumps(meta, indent=2) + "\n")
@@ -187,16 +159,25 @@ def iter_brain_records(slug: str):
 
 
 def media_files(path: Path) -> list[Path]:
-    """One recording, or every media file in a folder (non-recursive)."""
+    """One recording, or every media file under a folder (nested week dirs included)."""
     path = Path(path)
     if path.is_file():
         return [path] if path.suffix.lower() in MEDIA_SUFFIXES else []
     if not path.is_dir():
         return []
-    return sorted(
-        p for p in path.iterdir()
-        if p.is_file() and p.suffix.lower() in MEDIA_SUFFIXES and not p.name.startswith(".")
-    )
+    out = []
+    for p in path.rglob("*"):
+        if not p.is_file() or p.name.startswith("."):
+            continue
+        try:
+            rel = p.relative_to(path)
+        except ValueError:
+            continue
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if p.suffix.lower() in MEDIA_SUFFIXES:
+            out.append(p)
+    return sorted(out)
 
 
 def ingested_sources(slug: str) -> set[str]:
@@ -298,29 +279,53 @@ def _chunks(rec: dict) -> list[tuple[str, str]]:
     return chunks
 
 
-def retrieve(question: str, records: list[dict], k: int = 12) -> list[dict]:
+def retrieve(question: str, records: list[dict], k: int = 12, boost: list[dict] | None = None) -> list[dict]:
     q = _tokens(question)
     if not q:
         return []
-    scored = []
+    packed: list[tuple[dict, str, str, set[str]]] = []
     for rec in records:
         for label, text in _chunks(rec):
             words = set(_tokens(text))
-            if not words:
-                continue
-            overlap = sum(1 for w in q if w in words)
-            if overlap == 0:
-                continue
-            score = overlap / (1 + (len(words) ** 0.3))
-            scored.append({
-                "score": score,
-                "label": label,
-                "text": text.strip(),
-                "title": rec.get("title") or rec.get("source"),
-                "mode": rec.get("mode"),
-            })
+            if words:
+                packed.append((rec, label, text, words))
+    n_docs = max(1, len(packed))
+    df: dict[str, int] = {}
+    for _, _, _, words in packed:
+        for w in words:
+            df[w] = df.get(w, 0) + 1
+    boost_ids = {str(n.get("id") or "") for n in (boost or []) if n.get("id")}
+    boost_eps = set()
+    for node in boost or []:
+        for ep in node.get("episodes") or []:
+            if ep:
+                boost_eps.add(str(ep).lower())
+    q_blob = re.sub(r"\s+", " ", (question or "").strip().lower())[:80]
+    scored = []
+    for rec, label, text, words in packed:
+        hits = [w for w in q if w in words]
+        if not hits:
+            continue
+        score = 0.0
+        for w in hits:
+            score += math.log(1.0 + n_docs / max(1, df.get(w, 1)))
+        blob = text.lower()
+        if q_blob and q_blob in blob:
+            score += 2.4
+        title = str(rec.get("title") or rec.get("source") or "").lower()
+        if any(ep in title or title in ep for ep in boost_eps if ep):
+            score += 0.9
+        if any(bid and bid in blob for bid in boost_ids):
+            score += 0.5
+        score = score / (1 + (len(words) ** 0.2))
+        scored.append({
+            "score": score,
+            "label": label,
+            "text": text.strip(),
+            "title": rec.get("title") or rec.get("source"),
+            "mode": rec.get("mode"),
+        })
     scored.sort(key=lambda x: x["score"], reverse=True)
-    # de-dupe near-identical labels
     seen = set()
     out = []
     for hit in scored:
@@ -335,7 +340,7 @@ def retrieve(question: str, records: list[dict], k: int = 12) -> list[dict]:
 
 
 def ask_brain(slug: str, question: str, log=print) -> str:
-    from providers import complete_text
+    from .providers import complete_text
 
     brain = load_brain(slug)
     records = list(iter_brain_records(slug))
@@ -344,11 +349,27 @@ def ask_brain(slug: str, question: str, log=print) -> str:
             f"Brain `{slug}` has no recaps yet. Drop a recording into "
             f"brains/{slug}/inbox/ or run: ./catchup into {slug} FILE"
         )
-    hits = retrieve(question, records)
+    fired: list[dict] = []
+    try:
+        from . import cortex as cortex_mod
+
+        if cortex_mod.load_cortex(slug).get("nodes"):
+            fired = cortex_mod.activate(slug, question, hops=2, top=10)
+    except Exception:
+        fired = []
+    hits = retrieve(question, records, boost=fired)
     if not hits:
         hits = [{"label": rec.get("title"), "text": " ".join((rec.get("analysis") or {}).get("tldr") or [])} for rec in records[:6]]
     packed = []
     budget = 42000
+    if fired:
+        concept_lines = ["Activated concepts:"]
+        for node in fired[:8]:
+            concept_lines.append(
+                f"- {node.get('id')} ({node.get('kind')}) {node.get('definition') or ''}"
+            )
+        packed.append("\n".join(concept_lines) + "\n")
+        budget -= len(packed[-1])
     for hit in hits:
         piece = f"### {hit.get('label')}\n{hit.get('text', '')}\n"
         if budget - len(piece) < 0:
@@ -364,5 +385,134 @@ def ask_brain(slug: str, question: str, log=print) -> str:
         f"in this brain, say you don't have it — do not borrow from general knowledge "
         f"that wasn't in the recordings.\n\n"
         f"Question: {question}\n\nRetrieved context:\n{context}"
+    )
+    return complete_text(prompt, log=log)
+
+
+def canonical_speaker_label(raw: str) -> str:
+    s = (raw or "").strip()
+    named = re.match(r"(?i)^speaker\s*(\d+)$", s)
+    if named:
+        return f"Speaker {int(named.group(1))}"
+    if re.match(r"^\d+$", s):
+        return f"Speaker {int(s)}"
+    return s
+
+
+def speaker_map(slug: str) -> dict:
+    try:
+        return dict(load_brain(slug).get("speakers") or {})
+    except FileNotFoundError:
+        return {}
+
+
+def set_speaker_name(slug: str, label: str, name: str) -> dict:
+    meta = load_brain(slug)
+    speakers = meta.setdefault("speakers", {})
+    key = canonical_speaker_label(label)
+    name = (name or "").strip()
+    if not name:
+        speakers.pop(key, None)
+    else:
+        speakers[key] = name
+    meta["speakers"] = speakers
+    save_brain(meta)
+    return speakers
+
+
+def speaker_prompt_hint(slug: str | None) -> str:
+    if not slug:
+        return ""
+    mapping = speaker_map(slug)
+    if not mapping:
+        return ""
+    roster = ", ".join(f"{k} is {v}" for k, v in mapping.items() if v)
+    if not roster:
+        return ""
+    return (
+        f" Known roster: {roster}. Use those names in action_items and speakers[] "
+        "(keep the Speaker N label too)."
+    )
+
+
+def apply_speaker_map(slug: str | None, analysis: dict) -> dict:
+    if not slug or not isinstance(analysis, dict):
+        return analysis
+    mapping = speaker_map(slug)
+    if not mapping:
+        return analysis
+
+    def rewrite(text: str) -> str:
+        out = str(text)
+        for label, name in mapping.items():
+            if not name:
+                continue
+            out = re.sub(rf"\b{re.escape(label)}\b", name, out, flags=re.I)
+        return out
+
+    items = analysis.get("action_items")
+    if items:
+        analysis["action_items"] = [rewrite(str(x)) for x in items]
+    for sp in analysis.get("speakers") or []:
+        if not isinstance(sp, dict):
+            continue
+        label = canonical_speaker_label(str(sp.get("label") or ""))
+        if label in mapping:
+            sp["name"] = mapping[label]
+        if sp.get("said"):
+            sp["said"] = rewrite(str(sp["said"]))
+    for bm in analysis.get("bookmarks") or []:
+        if isinstance(bm, dict):
+            for key in ("heading", "insight"):
+                if bm.get(key):
+                    bm[key] = rewrite(str(bm[key]))
+    return analysis
+
+
+def grade_work(slug: str, work: str, assignment: str = "", log=print) -> str:
+    """Grade homework / code against this brain's recaps only."""
+    from .providers import complete_text
+
+    brain = load_brain(slug)
+    records = list(iter_brain_records(slug))
+    if not records:
+        return (
+            f"Brain `{slug}` has no recaps yet. File lectures first: "
+            f"./catchup into {slug} FILE"
+        )
+    work = (work or "").strip()
+    if not work:
+        return "Paste the homework, code, or written answer to grade."
+    query = f"{assignment} {work[:900]}".strip()
+    fired: list[dict] = []
+    try:
+        from . import cortex as cortex_mod
+
+        if cortex_mod.load_cortex(slug).get("nodes"):
+            fired = cortex_mod.activate(slug, query, hops=2, top=12)
+    except Exception:
+        fired = []
+    hits = retrieve(query, records, k=12, boost=fired)
+    packed = []
+    budget = 36000
+    for hit in hits:
+        piece = f"### {hit.get('label')}\n{hit.get('text', '')}\n"
+        if budget - len(piece) < 0:
+            break
+        packed.append(piece)
+        budget -= len(piece)
+    evidence = "\n".join(packed) if packed else "(no overlapping recap chunks)"
+    prompt = (
+        f"{brain.get('persona')}\n\n"
+        f"Grade this student work using ONLY the recaps in **{brain.get('name')}**. "
+        "Do not invent lecture content. Structure the reply as:\n"
+        "1. Verdict: correct / partial / off\n"
+        "2. What matches the recordings (cite recap titles and timestamps)\n"
+        "3. What's missing or contradicts the lectures\n"
+        "4. What to clip or restudy next (`./catchup clip {slug} TERM`)\n"
+        "If the work uses ideas that were never in these recordings, say so.\n\n"
+        f"Assignment prompt (may be empty): {assignment or '(none given)'}\n\n"
+        f"Student work:\n{work[:12000]}\n\n"
+        f"Evidence from recaps:\n{evidence}"
     )
     return complete_text(prompt, log=log)

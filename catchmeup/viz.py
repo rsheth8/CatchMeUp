@@ -150,22 +150,6 @@ def waveform(n: int = 40, phase: float = 0.0, packets: int = 2) -> str:
     return "".join(chars)
 
 
-def sparkline(values: list[float], width: int = 24) -> str:
-    if not values:
-        return glyphs()["h"] * width
-    lo, hi = min(values), max(values)
-    span = (hi - lo) or 1.0
-    blocks = glyphs()["wave"]
-    last = len(blocks) - 1
-    if len(values) >= width:
-        step = len(values) / width
-        sampled = [values[int(i * step)] for i in range(width)]
-    else:
-        sampled = values + [values[-1]] * (width - len(values))
-        sampled = sampled[:width]
-    return "".join(blocks[max(0, min(last, int((v - lo) / span * last)))] for v in sampled)
-
-
 def bar(value: float, ceiling: float, width: int = 16) -> str:
     g = glyphs()
     if ceiling <= 0:
@@ -904,7 +888,7 @@ def play_demo() -> None:
 def main(argv=None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in {"--web", "web", "--graph"}:
-        import graph
+        from . import graph
         print(graph.open_demo())
         return
     if args and args[0] in {"--animate", "animate"}:

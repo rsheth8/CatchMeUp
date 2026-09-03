@@ -20,11 +20,7 @@ import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
-
-import brains as brains_mod
+from . import brains as brains_mod
 
 MODES = ("meeting", "lecture")
 
@@ -340,8 +336,8 @@ def guess_mode(path: Path) -> str:
     return "meeting"
 
 
-def call_llm(transcript_text: str, mode: str) -> dict:
-    from providers import complete_json
+def call_llm(transcript_text: str, mode: str, speaker_hint: str = "") -> dict:
+    from .providers import complete_json
 
     if mode == "lecture":
         role = (
@@ -357,6 +353,8 @@ def call_llm(transcript_text: str, mode: str) -> dict:
             "Lines may be labeled Speaker 1, Speaker 2, … — use those labels in action items and speakers[]."
         )
         schema = MEETING_SCHEMA
+        if speaker_hint:
+            role += speaker_hint
 
     prompt = f"{role}\n\n{schema}\n\nTranscript (timestamped):\n{transcript_text}"
     return complete_json(prompt, log=log)
@@ -563,20 +561,11 @@ def persist_recap(
     }
     (archive_dir / "catchmeup.json").write_text(json.dumps(record, indent=2) + "\n")
     if brain_slug:
-        import cortex as cortex_mod
+        from . import cortex as cortex_mod
 
         cortex_mod.ingest_recap(brain_slug, record)
     record["_dir"] = str(archive_dir)
     return record, archive_dir
-
-
-def archive(*paths: Path, dest_dir: Path):
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    for p in paths:
-        if p.exists():
-            dest = dest_dir / p.name
-            if p.resolve() != dest.resolve():
-                p.rename(dest)
 
 
 def archive_pipeline_outputs(source: Path, mp3_path: Path, dest_dir: Path, keep: bool) -> None:
@@ -611,8 +600,8 @@ def ingest_limit() -> int | None:
 
 
 def process_recording(source: Path, mode: str | None, brain_slug: str | None) -> None:
-    from providers import active_provider, resolve_api_key
-    import viz
+    from .providers import active_provider, resolve_api_key
+    from . import viz
 
     source = source.resolve()
     mode = mode or guess_mode(source)
@@ -636,7 +625,10 @@ def process_recording(source: Path, mode: str | None, brain_slug: str | None) ->
 
     print(viz.pipeline_track("llm", f"{provider} recap"), flush=True)
     log(f"Calling {provider} for {mode} recap...")
-    analysis = call_llm(transcript_text, mode)
+    hint = brains_mod.speaker_prompt_hint(brain_slug) if brain_slug else ""
+    analysis = call_llm(transcript_text, mode, speaker_hint=hint)
+    if brain_slug:
+        analysis = brains_mod.apply_speaker_map(brain_slug, analysis)
 
     print(viz.pipeline_track("notes"), flush=True)
     recorded_at = datetime.fromtimestamp(source.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
@@ -725,7 +717,7 @@ def main(argv=None):
     if source.is_dir():
         sys.exit(process_folder(source, args.mode, brain_slug))
 
-    from providers import active_provider, resolve_api_key
+    from .providers import active_provider, resolve_api_key
 
     provider = active_provider()
     if not resolve_api_key(provider) and provider != "ollama":

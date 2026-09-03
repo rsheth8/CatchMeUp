@@ -52,7 +52,7 @@ header() {
 usage() {
   local art=""
   if python_ok || have python3; then
-    art="$(run_python -c "import viz; print(viz.banner())" 2>/dev/null || true)"
+    art="$(run_python -c "from catchmeup import viz; print(viz.banner())" 2>/dev/null || true)"
   fi
   if [[ -n "$art" ]]; then
     printf '%s\n\n' "$art"
@@ -83,6 +83,7 @@ ${BOLD}Recap${RESET}
   lecture FILE          Class / seminar
   rec [meeting|lecture] Record from the mic, then recap  (Ctrl-C to stop)
   rec --devices         List microphones
+  rec --system          Capture Zoom/Meet (BlackHole / ZoomAudioDevice)
   drop FILE             Copy a file into recordings/
   watch meeting|lecture Auto-recap new files in recordings/
 
@@ -98,6 +99,9 @@ ${BOLD}Brains${RESET}  ${DIM}one specialist per subject or team${RESET}
   graph NAME [CONCEPT]  Open CatchMeUp's own clickable graph
   trace NAME A B        Shortest path between two ideas
   exam NAME             Practice exam from its recaps
+  drill NAME            Re-test what you missed last time
+  grade NAME FILE       Grade homework/code against that brain
+  speakers NAME [N=Who] Nickname Speaker 1 in a meeting brain
   diff NAME             What changed since the last recap
   clip NAME WORDS       Play the audio of a concept
   cortex NAME [WORDS]   Concept graph; words light up a node
@@ -167,10 +171,11 @@ EOF
     config|providers|provider|model|mode)
       header "help · config"
       cat <<EOF
-Bring your own API key. Transcription stays on-device.
+Bring your own API key, or run local Ollama with no key. Transcription stays on-device.
 
   ./catchup providers
-  ./catchup config openai          # or anthropic, gemini, groq, …
+  ./catchup config anthropic       # or openai, gemini, groq, …
+  ./catchup config ollama          # no cloud key — then: ollama pull qwen3.6:35b
   ./catchup model gpt-4.1-mini
   ./catchup mode lecture           # default when you don't pass meeting/lecture
 EOF
@@ -195,6 +200,7 @@ Record from the Mac microphone, then recap. Ctrl-C stops.
   ./catchup rec --devices
   ./catchup rec lecture
   ./catchup rec meeting
+  ./catchup rec --system           # Zoom/Meet via BlackHole or ZoomAudioDevice
   ./catchup rec cs61a              # into that brain's inbox/
   ./catchup rec --keep             # save the file, skip recap
   ./catchup rec --device 0
@@ -282,6 +288,43 @@ Practice test from that brain's terms, study list, and key moments.
   ./catchup exam cs61a --print     # dump the test
   ./catchup exam cs61a --print --answers
   ./catchup exam cs61a -n 6
+  ./catchup drill cs61a            # tonight's misses
+  ./catchup quiz cs61a
+
+Questions are short and specific (what is X, what does s[4::30] do).
+Paraphrases count. Set CATCHMEUP_EXAM_LLM=0 to grade without the API.
+EOF
+      ;;
+    drill)
+      header "help · drill"
+      cat <<EOF
+Re-test the concepts you missed. Misses stick after ./catchup exam / quiz.
+
+  ./catchup drill cs61a
+  ./catchup drill cs61a -n 4
+EOF
+      ;;
+    grade|homework|hw)
+      header "help · grade"
+      cat <<EOF
+Grade a problem set or snippet against that brain's recaps only.
+
+  ./catchup grade cs61a homework.py
+  ./catchup grade cs61a - <<'EOF'
+  def fact(n):
+      return 1 if n < 2 else n * fact(n-1)
+  EOF
+EOF
+      ;;
+    speaker|speakers|who)
+      header "help · speakers"
+      cat <<EOF
+Map Speaker 1 / Speaker 2 to real names. Reused on every recap in that brain.
+
+  ./catchup speakers acme-client
+  ./catchup speakers acme-client 1=Jordan
+  ./catchup speakers acme-client 2=Priya
+  ./catchup speakers acme-client 1=
 EOF
       ;;
     diff|drift)
@@ -300,7 +343,9 @@ Find a concept and play 25 seconds of the archived audio.
 
   ./catchup clip cs61a mutex
   ./catchup clip billing
-  ./catchup clip cs61a mutex --print    # show the timestamp, don't play
+  ./catchup clip cs61a mutex --print    # list every timestamp, don't play
+
+In a terminal, n/p jumps moments, w opens walk, Ctrl-C skips to the next clip.
 EOF
       ;;
     mcp)
@@ -472,7 +517,7 @@ cmd_setup() {
   fi
   info "Installing Python packages"
   "$PYTHON" -m pip install --upgrade pip >/dev/null
-  "$PYTHON" -m pip install -r "$PROJECT_DIR/requirements.txt"
+  "$PYTHON" -m pip install -e "$PROJECT_DIR"
   ok "Python venv + anthropic + openai + python-docx"
 
   ensure_dirs
@@ -481,8 +526,9 @@ cmd_setup() {
   if [[ ! -f "$ENV_FILE" ]]; then
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     echo
-    warn "No .env yet — paste an API key from any supported company."
-    echo "    List them: ./catchup providers"
+    warn "No .env yet — paste an API key, or stay local with Ollama."
+    echo "    List companies: ./catchup providers"
+    echo "    No key:         ./catchup config ollama   then   ollama pull qwen3.6:35b"
     cmd_config
   else
     ok ".env already present"
@@ -503,7 +549,7 @@ cmd_setup() {
 cmd_providers() {
   header "API keys we accept"
   if python_ok || have python3; then
-    run_python "$PROJECT_DIR/providers.py" --list
+    run_python -m catchmeup.providers --list
   else
     cat <<'EOF'
 anthropic     Anthropic (Claude)
@@ -729,7 +775,7 @@ cmd_doctor() {
   if [[ "$failed" -eq 0 ]]; then
     echo "${GREEN}${BOLD}All good.${RESET}"
     if python_ok || have python3; then
-      run_python -c "import viz; print(viz.ok_wave())" 2>/dev/null || true
+      run_python -c "from catchmeup import viz; print(viz.ok_wave())" 2>/dev/null || true
     fi
     return 0
   else
@@ -769,11 +815,11 @@ cmd_recap() {
   if [[ -n "$mode" ]]; then
     header "CatchMeUp · ${mode}"
     info "$(basename "$file")"
-    run_python "$PROJECT_DIR/pipeline.py" --mode "$mode" "$file"
+    run_python -m catchmeup.pipeline --mode "$mode" "$file"
   else
     header "CatchMeUp"
     info "$(basename "$file")  (mode guessed from name / default)"
-    run_python "$PROJECT_DIR/pipeline.py" "$file"
+    run_python -m catchmeup.pipeline "$file"
   fi
   echo
   ok "Notes are in ${BOLD}output/${RESET}"
@@ -810,7 +856,7 @@ cmd_watch() {
     shift || true
     mode="$(normalize_mode "${1:-}")"
     if [[ -z "$mode" ]]; then
-      mode="$(run_python -c "import brains; print(brains.load_brain('$brain')['kind'])")"
+      mode="$(run_python -c "from catchmeup import brains; print(brains.load_brain('$brain')['kind'])")"
     fi
   else
     mode="$(normalize_mode "${1:-}")"
@@ -902,19 +948,21 @@ cmd_list() {
 }
 
 run_python() {
+  local py
   if python_ok; then
-    "$PYTHON" "$@"
+    py="$PYTHON"
   elif have python3; then
-    python3 "$@"
+    py="$(command -v python3)"
   else
     err "Run ./catchup setup first."
     exit 1
   fi
+  PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$py" "$@"
 }
 
 lib() {
   load_env
-  run_python "$PROJECT_DIR/library.py" "$@"
+  run_python -m catchmeup.library "$@"
 }
 
 optional_mode_args() {
@@ -985,7 +1033,10 @@ cmd_ask() {
 cmd_quiz() {
   header "Quiz"
   local extra=()
-  if [[ -n "$(normalize_mode "${1:-}")" ]]; then
+  if is_brain "${1:-}"; then
+    extra=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
     extra=(--mode "$(normalize_mode "$1")")
     shift
   fi
@@ -995,7 +1046,10 @@ cmd_quiz() {
 cmd_todos() {
   header "Action items"
   local extra=()
-  if [[ -n "$(normalize_mode "${1:-}")" ]]; then
+  if is_brain "${1:-}"; then
+    extra=(--brain "$1")
+    shift
+  elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
     extra=(--mode "$(normalize_mode "$1")")
     shift
   fi
@@ -1077,20 +1131,105 @@ cmd_exam() {
     extra+=(--brain "$1")
     shift
   fi
-  run_python "$PROJECT_DIR/exam.py" "${extra[@]}" "$@"
+  run_python -m catchmeup.exam "${extra[@]}" "$@"
+}
+
+cmd_drill() {
+  local slug="${1:-}"
+  shift || true
+  if [[ -z "$slug" ]] || ! is_brain "$slug"; then
+    err "Usage: ./catchup drill <brain> [-n 6]"
+    exit 1
+  fi
+  header "Drill · ${slug}"
+  run_python -m catchmeup.exam --brain "$slug" --drill "$@"
+}
+
+cmd_speakers() {
+  local slug="${1:-}"
+  shift || true
+  if [[ -z "$slug" ]] || ! is_brain "$slug"; then
+    err "Usage: ./catchup speakers <brain> [N=Name]"
+    echo "    ./catchup speakers acme-client"
+    echo "    ./catchup speakers acme-client 1=Jordan"
+    exit 1
+  fi
+  header "Speakers · ${slug}"
+  run_python - "$slug" "$@" <<'PY'
+import sys
+from catchmeup import brains
+slug = sys.argv[1]
+args = sys.argv[2:]
+mapping = brains.speaker_map(slug)
+if args:
+    for spec in args:
+        if "=" not in spec:
+            print(f"Skip {spec!r} — use 1=Jordan")
+            continue
+        label, _, name = spec.partition("=")
+        mapping = brains.set_speaker_name(slug, label, name)
+        if name.strip():
+            print(f"  {brains.canonical_speaker_label(label)} → {name.strip()}")
+        else:
+            print(f"  {brains.canonical_speaker_label(label)} cleared")
+if not mapping:
+    print("No nicknames yet. After a meeting recap:")
+    print(f"  ./catchup speakers {slug} 1=Jordan")
+else:
+    print("Roster (used on the next recap and in todos):")
+    for label, name in mapping.items():
+        print(f"  {label}  →  {name}")
+PY
+}
+
+cmd_grade() {
+  local slug="${1:-}"
+  local src="${2:-}"
+  if [[ -z "$slug" ]] || ! is_brain "$slug"; then
+    err "Usage: ./catchup grade <brain> FILE"
+    echo "    ./catchup grade cs61a homework.py"
+    echo "    ./catchup grade cs61a -     # stdin"
+    exit 1
+  fi
+  header "Grade · ${slug}"
+  load_env
+  local tmp=""
+  if [[ -z "$src" || "$src" == "-" ]]; then
+    if [[ -t 0 ]]; then
+      err "Paste work into a file, or pipe it:  ./catchup grade $slug -"
+      exit 1
+    fi
+    tmp="$(mktemp)"
+    cat > "$tmp"
+    src="$tmp"
+  elif [[ ! -f "$src" ]]; then
+    err "File not found: $src"
+    exit 1
+  fi
+  run_python - "$slug" "$src" <<'PY'
+import sys
+from pathlib import Path
+from catchmeup import brains
+slug, src = sys.argv[1], sys.argv[2]
+path = Path(src)
+work = path.read_text()
+print(brains.grade_work(slug, work, assignment=path.name))
+PY
+  [[ -n "$tmp" ]] && rm -f "$tmp"
 }
 
 cmd_rec() {
-  local mode="" brain="" keep=0 device="" seconds="" fake=0
+  local mode="" brain="" keep=0 device="" seconds="" fake=0 system=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --devices|-l|--list-devices)
         header "Microphones"
-        run_python "$PROJECT_DIR/record.py" --devices
+        run_python -m catchmeup.record --devices
         return
         ;;
       --keep|--no-recap) keep=1; shift ;;
       --fake) fake=1; shift ;;
+      --system|--loopback|--zoom) system=1; shift ;;
       --device|-d)
         device="${2:-}"
         shift 2 || true
@@ -1100,11 +1239,12 @@ cmd_rec() {
         shift 2 || true
         ;;
       --help|-h)
-        err "Usage: ./catchup rec [meeting|lecture|brain] [--keep] [--device N]"
+        err "Usage: ./catchup rec [meeting|lecture|brain] [--keep] [--device N] [--system]"
         echo "    ./catchup rec                 # default mode, then recap"
         echo "    ./catchup rec lecture         # class recap after Ctrl-C"
+        echo "    ./catchup rec --system        # Zoom/Meet via BlackHole or ZoomAudioDevice"
         echo "    ./catchup rec cs61a           # into that brain's inbox/"
-        echo "    ./catchup rec --devices       # list mics"
+        echo "    ./catchup rec --devices       # list mics + [system] devices"
         echo "    ./catchup rec --keep          # save the file, skip recap"
         exit 0
         ;;
@@ -1124,7 +1264,7 @@ cmd_rec() {
     esac
   done
   if [[ -n "$brain" && -z "$mode" ]]; then
-    mode="$(run_python -c "import brains; print(brains.load_brain('$brain')['kind'])")"
+    mode="$(run_python -c "from catchmeup import brains; print(brains.load_brain('$brain')['kind'])")"
   fi
   [[ -z "$mode" ]] && mode="$(default_mode)"
   ensure_dirs
@@ -1142,7 +1282,8 @@ cmd_rec() {
   [[ -n "$seconds" ]] && rec_args+=(--seconds "$seconds")
   [[ -n "$brain" ]] && rec_args+=(--brain "$brain")
   [[ "$fake" -eq 1 ]] && rec_args+=(--fake)
-  run_python "$PROJECT_DIR/record.py" "${rec_args[@]}"
+  [[ "$system" -eq 1 ]] && rec_args+=(--system)
+  run_python -m catchmeup.record "${rec_args[@]}"
   if [[ ! -f "$dest" ]]; then
     err "No recording written."
     exit 1
@@ -1248,7 +1389,7 @@ cmd_brain() {
     list|ls)
       header "Brains"
       run_python - <<'PY'
-import brains
+from catchmeup import brains
 rows = brains.list_brains()
 if not rows:
     print("None yet. Create one:")
@@ -1287,7 +1428,8 @@ PY
       done
       header "New brain"
       run_python - "$name" "$kind" "$persona" <<'PY'
-import sys, brains
+import sys
+from catchmeup import brains
 name, kind, persona = sys.argv[1], sys.argv[2], sys.argv[3]
 meta = brains.create_brain(name, kind=kind, persona=persona or None)
 print(f"Created {meta['slug']}  ({meta['kind']})")
@@ -1310,7 +1452,8 @@ PY
       fi
       if [[ $# -gt 0 ]]; then
         run_python - "$slug" "$*" <<'PY'
-import sys, brains
+import sys
+from catchmeup import brains
 meta = brains.load_brain(sys.argv[1])
 meta["persona"] = sys.argv[2]
 brains.save_brain(meta)
@@ -1325,7 +1468,8 @@ PY
           lines+="$line"$'\n'
         done
         run_python - "$slug" "$lines" <<'PY'
-import sys, brains
+import sys
+from catchmeup import brains
 meta = brains.load_brain(sys.argv[1])
 meta["persona"] = sys.argv[2].strip()
 brains.save_brain(meta)
@@ -1340,7 +1484,8 @@ PY
         exit 1
       fi
       run_python - "$slug" <<'PY'
-import sys, json, brains
+import sys, json
+from catchmeup import brains
 print(json.dumps(brains.load_brain(sys.argv[1]), indent=2))
 PY
       ;;
@@ -1368,8 +1513,8 @@ cmd_think() {
   load_env
   run_python - "$slug" "$*" <<'PY'
 import sys
-import cortex
-import library
+from catchmeup import cortex
+from catchmeup import library
 library.load_env()
 print(cortex.think(sys.argv[1], sys.argv[2]))
 PY
@@ -1390,7 +1535,8 @@ cmd_cortex() {
   fi
   header "Cortex · ${slug}"
   run_python - "$slug" "$@" <<'PY'
-import sys, cortex
+import sys
+from catchmeup import cortex
 slug = sys.argv[1]
 args = sys.argv[2:]
 rebuild = False
@@ -1429,14 +1575,16 @@ cmd_walk() {
   fi
   if [[ "$print_only" -eq 1 ]]; then
     run_python - "$slug" "$*" <<'PY'
-import sys, cortex
+import sys
+from catchmeup import cortex
 slug = sys.argv[1]
 query = sys.argv[2].strip() if len(sys.argv) > 2 else ""
 print(cortex.format_walk(slug, query or None))
 PY
   else
     run_python - "$slug" "$*" <<'PY'
-import sys, cortex
+import sys
+from catchmeup import cortex
 slug = sys.argv[1]
 query = sys.argv[2].strip() if len(sys.argv) > 2 else ""
 cortex.run_walk(slug, query or None)
@@ -1456,7 +1604,8 @@ cmd_notes() {
   fi
   header "Notes · ${slug}"
   run_python - "$slug" <<'PY'
-import sys, cortex
+import sys
+from catchmeup import cortex
 print(cortex.format_notes(sys.argv[1]))
 PY
 }
@@ -1476,7 +1625,8 @@ cmd_graph() {
   fi
   header "Graph · ${slug}"
   run_python - "$slug" "$*" <<'PY'
-import sys, graph
+import sys
+from catchmeup import graph
 slug = sys.argv[1]
 focus = sys.argv[2].strip() if len(sys.argv) > 2 else ""
 path = graph.open_graph(slug, focus or None)
@@ -1502,7 +1652,8 @@ cmd_obsidian() {
   fi
   header "Obsidian export · ${slug}"
   run_python - "$slug" "$dest" <<'PY'
-import sys, cortex
+import sys
+from catchmeup import cortex
 slug = sys.argv[1]
 dest = sys.argv[2].strip() or None
 path = cortex.export_obsidian(slug, dest)
@@ -1528,7 +1679,8 @@ cmd_trace() {
   shift
   header "Trace · ${slug}"
   run_python - "$slug" "$src" "$*" <<'PY'
-import sys, cortex
+import sys
+from catchmeup import cortex
 print(cortex.format_trace(sys.argv[1], sys.argv[2], sys.argv[3]))
 PY
 }
@@ -1538,15 +1690,15 @@ cmd_demo() {
   if [[ "$arg" == "--web" || "$arg" == "web" || "$arg" == "--graph" ]]; then
     header "Demo · graph"
     local path
-    path="$(run_python -c "import graph; print(graph.open_demo())")"
+    path="$(run_python -c "from catchmeup import graph; print(graph.open_demo())")"
     info "$path"
-    info "Click a neuron. Drag to pull it. Scroll to zoom."
+    info "Click a concept. Drag to pan. Scroll to zoom."
     return
   fi
   if [[ -t 1 && -z "${CATCHMEUP_PLAIN:-}" ]]; then
-    run_python "$PROJECT_DIR/viz.py" --animate
+    run_python -m catchmeup.viz --animate
   else
-    run_python "$PROJECT_DIR/viz.py"
+    run_python -m catchmeup.viz
   fi
 }
 
@@ -1567,17 +1719,17 @@ cmd_into() {
   fi
   load_env
   local kind
-  kind="$(run_python -c "import brains; print(brains.load_brain('$slug')['kind'])")"
+  kind="$(run_python -c "from catchmeup import brains; print(brains.load_brain('$slug')['kind'])")"
   if [[ -d "$src" ]]; then
     header "Into ${slug}  (${kind}, folder)"
     info "$src"
-    run_python "$PROJECT_DIR/pipeline.py" --mode "$kind" --brain "$slug" "$src"
+    run_python -m catchmeup.pipeline --mode "$kind" --brain "$slug" "$src"
     ok "Folder pass done.  ./catchup notes $slug   ·  ./catchup graph $slug"
     return
   fi
   header "Into ${slug}  (${kind})"
   info "$(basename "$src")"
-  run_python "$PROJECT_DIR/pipeline.py" --mode "$kind" --brain "$slug" "$src"
+  run_python -m catchmeup.pipeline --mode "$kind" --brain "$slug" "$src"
   ok "Filed into brains/${slug}/  — ask it: ./catchup ask $slug <question>"
 }
 
@@ -1594,7 +1746,11 @@ cmd_mcp() {
   "mcpServers": {
     "catchmeup": {
       "command": "${py}",
-      "args": ["${PROJECT_DIR}/mcp_server.py"]
+      "args": ["-m", "catchmeup.mcp"],
+      "env": {
+        "CATCHMEUP_HOME": "${PROJECT_DIR}",
+        "PYTHONPATH": "${PROJECT_DIR}"
+      }
     }
   }
 }
@@ -1608,10 +1764,11 @@ EOF
       echo "    $PROJECT_DIR"
       ;;
     run)
+      export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
       if python_ok; then
-        exec "$PYTHON" "$PROJECT_DIR/mcp_server.py"
+        exec "$PYTHON" -m catchmeup.mcp
       else
-        exec python3 "$PROJECT_DIR/mcp_server.py"
+        exec python3 -m catchmeup.mcp
       fi
       ;;
     *)
@@ -1667,6 +1824,9 @@ main() {
     demo|splash|viz) cmd_demo "$@" ;;
     quiz|flashcards) cmd_quiz "$@" ;;
     exam|midterm|test) cmd_exam "$@" ;;
+    drill|srs) cmd_drill "$@" ;;
+    grade|homework|hw) cmd_grade "$@" ;;
+    speakers|speaker|who) cmd_speakers "$@" ;;
     diff|drift) cmd_diff "$@" ;;
     todos|todo|actions) cmd_todos "$@" ;;
     moments|bookmarks) cmd_moments "$@" ;;

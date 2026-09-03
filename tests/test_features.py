@@ -6,10 +6,11 @@ import random
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import exam
-import library
-import pipeline
-import record
+from catchmeup import brains
+from catchmeup import exam
+from catchmeup import library
+from catchmeup import pipeline
+from catchmeup import record
 from tests.support import IsolatedHome, MEETING_ANALYSIS
 
 
@@ -64,20 +65,46 @@ class DiarizeTests(IsolatedHome):
 
 class ExamTests(IsolatedHome):
     def test_build_and_grade(self):
-        import brains
-
         self.seed_lecture("cs61a")
         questions = exam.build_exam(list(brains.iter_brain_records("cs61a")), count=6, rng=random.Random(0))
         self.assertTrue(questions)
         self.assertTrue(any("mutex" in q["prompt"].lower() or "mutex" in q["answer"].lower() for q in questions))
         define = next(q for q in questions if q["kind"] == "term" and "mutex" in q["prompt"].lower())
+        self.assertIn("what is", define["prompt"].lower())
+        self.assertNotIn("Define:", define["prompt"])
         result = exam.grade_answer(define, "a lock only one thread can hold")
         self.assertEqual(result["verdict"], "pass")
         miss = exam.grade_answer(define, "bananas")
         self.assertEqual(miss["verdict"], "miss")
+        filler = exam.grade_answer(define, "only one can this that")
+        self.assertEqual(filler["verdict"], "miss")
         printed = exam.format_exam(questions, answers=True)
         self.assertIn("CatchMeUp exam", printed)
         self.assertIn("mutex", printed.lower())
+        self.assertFalse(any(q["prompt"].startswith("Define:") for q in questions))
+        self.assertFalse(any("Why does" in q["prompt"] for q in questions))
+
+    def test_paraphrase_and_specific_prompts(self):
+        q = exam._term_question(
+            "string concatenation",
+            "The process of joining two or more strings together end-to-end to create a new string. In Python this uses +.",
+            "strings lecture",
+        )
+        self.assertIsNotNone(q)
+        self.assertIn("what is", q["prompt"].lower())
+        self.assertEqual(
+            exam.grade_answer(q, "joining two strings together with +")["verdict"],
+            "pass",
+        )
+        moment = exam._moment_question(
+            "Slice with step parameter: s[4::30]",
+            "start=4, stop is the end, step=30; if the string is shorter you just get the character at 4.",
+            "strings lecture",
+            "0:01:55",
+        )
+        self.assertIsNotNone(moment)
+        self.assertIn("s[4::30]", moment["prompt"])
+        self.assertNotIn("will be on the exam", moment["answer"].lower())
 
 
 class DiffTests(IsolatedHome):
@@ -155,8 +182,8 @@ class ClipTests(IsolatedHome):
 
         audio = self.home / "lec.mp3"
         audio.write_bytes(b"xx")
-        with patch("library.shutil.which", side_effect=lambda n: "/bin/true"):
-            with patch("library.subprocess.run") as run:
+        with patch("catchmeup.library.shutil.which", side_effect=lambda n: "/bin/true"):
+            with patch("catchmeup.library.subprocess.run") as run:
                 run.return_value = MagicMock(returncode=0)
                 library.play_range(audio, 12.4, duration=2)
         cmds = [c.args[0] for c in run.call_args_list]
@@ -168,6 +195,51 @@ class ClipTests(IsolatedHome):
         self.assertEqual(afplay_cmd[0], "/bin/true")
         self.assertNotEqual(afplay_cmd[1], "-")
         self.assertTrue(str(afplay_cmd[1]).endswith(".wav"))
+
+    def test_cortex_clip_lists_all_moments(self):
+        self.seed_lecture("cs61a")
+        clips = library.list_clips("mutex", brain="cs61a")
+        self.assertGreaterEqual(len(clips), 1)
+        self.assertEqual(clips[0]["timestamp"], "00:12:40")
+
+
+class MemoryAndSpeakerTests(IsolatedHome):
+    def test_exam_remembers_misses_and_drill_prefers_them(self):
+        self.seed_lecture("cs61a")
+        q = {"prompt": "Define: mutex", "answer": "a lock", "kind": "term", "source": "w3"}
+        exam.record_attempt("cs61a", q, "miss", "bananas")
+        exam.record_attempt("cs61a", q, "miss", "nope")
+        weak = exam.weakest_concepts("cs61a")
+        self.assertTrue(any("mutex" in c for c, _, _ in weak))
+        rows = list(brains.iter_brain_records("cs61a"))
+        questions = exam.build_exam(rows, count=3, brain="cs61a")
+        self.assertTrue(any("mutex" in q["prompt"].lower() for q in questions))
+
+    def test_long_notes_grade_does_not_need_every_token(self):
+        q = {
+            "prompt": "Explain: Mutexes",
+            "kind": "notes",
+            "answer": (
+                "A mutex has acquire and release. Only one thread holds it at a time. "
+                "Always acquire before touching the shared counter. Release when done. "
+                "This pattern appears on every quiz and in lab 3 writeups."
+            ),
+        }
+        result = exam.grade_answer(q, "a lock only one thread can hold")
+        self.assertIn(result["verdict"], {"pass", "partial"})
+        miss = exam.grade_answer(q, "bananas")
+        self.assertEqual(miss["verdict"], "miss")
+
+    def test_speaker_nicknames_rewrite_action_items(self):
+        self.seed_meeting("acme-client")
+        brains.set_speaker_name("acme-client", "1", "Jordan")
+        mapped = brains.apply_speaker_map("acme-client", {
+            "action_items": ["Speaker 1: send the addendum"],
+            "speakers": [{"label": "Speaker 1", "name": "unknown", "said": "hi"}],
+        })
+        self.assertIn("Jordan", mapped["action_items"][0])
+        self.assertEqual(mapped["speakers"][0]["name"], "Jordan")
+        self.assertIn("Speaker 1 is Jordan", brains.speaker_prompt_hint("acme-client"))
 
 
 class RecordTests(IsolatedHome):
@@ -182,6 +254,16 @@ class RecordTests(IsolatedHome):
         devices = record.parse_avfoundation_audio(blob)
         self.assertEqual(devices[0], (0, "MacBook Pro Microphone"))
         self.assertEqual(devices[1][1], "ZoomAudioDevice")
+        self.assertTrue(record.is_loopback_name("ZoomAudioDevice"))
+        self.assertFalse(record.is_loopback_name("MacBook Pro Microphone"))
+        picked = record.pick_system_device(devices)
+        self.assertEqual(picked[1], "ZoomAudioDevice")
+        blackhole = record.pick_system_device([
+            (0, "MacBook Pro Microphone"),
+            (2, "BlackHole 2ch"),
+            (1, "ZoomAudioDevice"),
+        ])
+        self.assertEqual(blackhole[1], "BlackHole 2ch")
 
     def test_fake_record(self):
         dest = self.home / "recordings" / "tone.m4a"

@@ -13,11 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
-
-import brains
+from . import brains
 
 
 def ffmpeg_bin() -> str:
@@ -26,6 +22,13 @@ def ffmpeg_bin() -> str:
         if candidate and Path(candidate).exists():
             return candidate
     raise FileNotFoundError("ffmpeg not found. brew install ffmpeg")
+
+
+LOOPBACK_HINTS = (
+    "blackhole", "loopback", "zoomaudio", "zoom audio", "soundflower",
+    "aggregate", "multi-output", "vb-audio", "vb cable", "cable input",
+    "captures", "system audio",
+)
 
 
 def parse_avfoundation_audio(stderr: str) -> list[tuple[int, str]]:
@@ -44,6 +47,24 @@ def parse_avfoundation_audio(stderr: str) -> list[tuple[int, str]]:
         if m:
             devices.append((int(m.group(1)), m.group(2).strip()))
     return devices
+
+
+def is_loopback_name(name: str) -> bool:
+    blob = (name or "").lower()
+    return any(h in blob for h in LOOPBACK_HINTS)
+
+
+def pick_system_device(devices: list[tuple[int, str]]) -> tuple[int, str] | None:
+    """Prefer BlackHole / Loopback, then Zoom's virtual device, then any loopback."""
+    ranked = ("blackhole", "loopback", "zoomaudio", "zoom audio")
+    for hint in ranked:
+        for idx, name in devices:
+            if hint in name.lower():
+                return idx, name
+    for idx, name in devices:
+        if is_loopback_name(name):
+            return idx, name
+    return None
 
 
 def list_audio_devices() -> list[tuple[int, str]]:
@@ -69,6 +90,7 @@ def record_audio(
     device: str | None = None,
     seconds: float | None = None,
     fake: bool = False,
+    system: bool = False,
 ) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     ff = ffmpeg_bin()
@@ -87,7 +109,23 @@ def record_audio(
     if sys.platform != "darwin":
         raise RuntimeError("./catchup rec uses the Mac microphone (AVFoundation).")
 
-    idx = (device or default_device()).strip()
+    idx = (device or "").strip()
+    if system and not idx:
+        devices = list_audio_devices()
+        picked = pick_system_device(devices)
+        if not picked:
+            names = ", ".join(n for _, n in devices) or "(none)"
+            raise RuntimeError(
+                "No system-audio device found. Zoom/Meet don't show up as the Mac mic.\n"
+                "  • If Zoom is running, try ZoomAudioDevice: ./catchup rec --devices\n"
+                "  • Or install BlackHole (free), set it as Zoom's speaker, then:\n"
+                "      ./catchup rec --system\n"
+                f"  Devices I can see: {names}"
+            )
+        idx, label = str(picked[0]), picked[1]
+        print(f"System audio → [{idx}] {label}")
+    if not idx:
+        idx = default_device()
     cmd = [
         ff, "-y", "-hide_banner",
         "-f", "avfoundation",
@@ -97,7 +135,7 @@ def record_audio(
         cmd += ["-t", str(seconds)]
     cmd += ["-ac", "1", "-ar", "44100", "-c:a", "aac", str(dest)]
 
-    import viz
+    from . import viz
 
     err_log = dest.with_suffix(dest.suffix + ".ffmpeg.log")
     live = viz.use_tty()
@@ -158,6 +196,11 @@ def main(argv=None):
     parser.add_argument("-t", "--seconds", type=float, help="Stop after this many seconds")
     parser.add_argument("--brain")
     parser.add_argument("--fake", action="store_true", help="Generate a test tone instead of using the mic")
+    parser.add_argument(
+        "--system",
+        action="store_true",
+        help="Capture Zoom/Meet via BlackHole, Loopback, or ZoomAudioDevice",
+    )
     args = parser.parse_args(argv)
 
     if args.devices:
@@ -171,9 +214,11 @@ def main(argv=None):
             sys.exit(1)
         print("index\tdevice")
         for idx, name in devices:
-            print(f"{idx}\t{name}")
-        print("\nUse:  ./catchup rec --device 0")
-        print("Or:   CATCHMEUP_AUDIO_DEVICE=1 ./catchup rec")
+            tag = "  [system]" if is_loopback_name(name) else ""
+            print(f"{idx}\t{name}{tag}")
+        print("\nMic:     ./catchup rec --device 0")
+        print("Zoom:    ./catchup rec --system")
+        print("Or:      CATCHMEUP_AUDIO_DEVICE=1 ./catchup rec")
         return
 
     dest = Path(args.out) if args.out else suggested_path(args.brain)
@@ -182,12 +227,18 @@ def main(argv=None):
     print(f"Recording → {dest}")
     fake = args.fake or fake_mic_requested()
     if not fake:
-        import viz
+        from . import viz
         if not viz.use_tty():
             print("Speak. Ctrl-C stops.")
-    path = record_audio(dest, device=args.device, seconds=args.seconds, fake=args.fake)
+    path = record_audio(
+        dest,
+        device=args.device,
+        seconds=args.seconds,
+        fake=args.fake,
+        system=args.system,
+    )
     if fake:
-        import viz
+        from . import viz
         print(viz.rec_frame(args.seconds or 1.0))
     print(path)
 

@@ -91,7 +91,7 @@ PROVIDERS = {
         "label": "Ollama (local, no cloud key)",
         "kind": "openai",
         "base_url": "http://127.0.0.1:11434/v1",
-        "default_model": "llama3.1",
+        "default_model": "qwen3.6:35b",
         "signup": "https://ollama.com",
         "key_env": ("CATCHMEUP_API_KEY",),
         "dummy_key": "ollama",
@@ -172,6 +172,31 @@ def resolve_base_url(provider: str) -> str | None:
     return PROVIDERS[provider].get("base_url")
 
 
+def openai_extra_body(provider: str) -> dict | None:
+    """Ollama extras: skip chain-of-thought (recaps need JSON) and widen context.
+
+    On /v1, `think: false` is ignored. `reasoning_effort: "none"` is what actually
+    turns thinking off so max_tokens is not eaten by an empty `reasoning` field.
+    """
+    if provider != "ollama":
+        return None
+    think = (os.environ.get("CATCHMEUP_OLLAMA_THINK") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    body: dict = {"reasoning_effort": "medium" if think else "none"}
+    raw_ctx = (os.environ.get("CATCHMEUP_NUM_CTX") or "32768").strip()
+    try:
+        ctx = int(raw_ctx)
+    except ValueError:
+        ctx = 32768
+    if ctx > 0:
+        body["options"] = {"num_ctx": ctx}
+    return body
+
+
 def parse_json_payload(raw: str) -> dict:
     text = (raw or "").strip()
     if text.startswith("```"):
@@ -202,7 +227,15 @@ def _complete_anthropic(prompt: str, model: str, api_key: str) -> str:
     return resp.content[0].text
 
 
-def _complete_openai(prompt: str, model: str, api_key: str, base_url: str | None, headers: dict | None, json_mode: bool = False) -> str:
+def _complete_openai(
+    prompt: str,
+    model: str,
+    api_key: str,
+    base_url: str | None,
+    headers: dict | None,
+    json_mode: bool = False,
+    extra_body: dict | None = None,
+) -> str:
     from openai import OpenAI
 
     kwargs = {"api_key": api_key}
@@ -216,6 +249,8 @@ def _complete_openai(prompt: str, model: str, api_key: str, base_url: str | None
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 8000,
     }
+    if extra_body:
+        create_kwargs["extra_body"] = extra_body
     if json_mode:
         try:
             resp = client.chat.completions.create(
@@ -252,7 +287,15 @@ def _complete_raw(prompt: str, json_mode: bool, log, retries: int) -> str:
         try:
             if spec["kind"] == "anthropic":
                 return _complete_anthropic(prompt, model, api_key)
-            return _complete_openai(prompt, model, api_key, base_url, spec.get("headers"), json_mode=json_mode)
+            return _complete_openai(
+                prompt,
+                model,
+                api_key,
+                base_url,
+                spec.get("headers"),
+                json_mode=json_mode,
+                extra_body=openai_extra_body(provider),
+            )
         except Exception as e:
             last_err = e
             name = type(e).__name__
@@ -299,6 +342,7 @@ def format_provider_list() -> str:
     lines.append("")
     lines.append("Set one with:  ./catchup config openai")
     lines.append("Then paste that company's API key. Optional: ./catchup model gpt-4.1-mini")
+    lines.append("No cloud key:  ./catchup config ollama   then   ollama pull qwen3.6:35b")
     return "\n".join(lines)
 
 

@@ -24,7 +24,7 @@ The command is `./catchup`.
 ## Send this to someone
 
 1. Share the GitHub repo. **Do not send your `.env`** — that file has your API key.
-2. They need a Mac, [Homebrew](https://brew.sh), and an API key from **any** supported company (`./catchup providers`).
+2. They need a Mac and [Homebrew](https://brew.sh). For notes they can paste a key (`./catchup config anthropic`) **or** stay local with no key: install [Ollama](https://ollama.com), then `./catchup config ollama` and `ollama pull qwen3.6:35b`.
 3. `./catchup doctor` tells them if anything is missing.
 
 ---
@@ -34,7 +34,7 @@ The command is `./catchup`.
 ```bash
 git clone https://github.com/rsheth8/CatchMeUp.git
 cd CatchMeUp
-chmod +x catchup watch_and_process.sh pipeline.py
+chmod +x catchup watch_and_process.sh
 ./catchup setup
 ```
 
@@ -50,11 +50,14 @@ brew install whisperkit-cli
 | **ffmpeg** | Converts `.mov` / `.mp4` / `.m4a` / … into an `.mp3` WhisperKit can read |
 | **whisperkit-cli** | On-device transcription with timestamps (audio never leaves your Mac) |
 
-Then pick a company for the notes step, and a recap style:
+Then pick how notes get written, and a recap style:
 
 ```bash
 ./catchup providers
-./catchup config openai          # or anthropic, gemini, groq, openrouter, …
+./catchup config anthropic       # paste a Claude / OpenAI / Gemini / … key
+# or, no cloud key:
+#   ./catchup config ollama
+#   ollama pull qwen3.6:35b
 ./catchup mode meeting           # work
 ./catchup mode lecture           # school
 ./catchup doctor
@@ -64,8 +67,10 @@ Then pick a company for the notes step, and a recap style:
 
 ## Commands
 
-Run `./catchup` or `./catchup help` anytime for the command list.  
+Run `./catchup` or `./catchup help` anytime for the full command list.  
 `./catchup help exam` (or `rec`, `brain`, `clip`, …) prints a short page for that command.
+
+The table below is the everyday set. New commands land in `./catchup help` first.
 
 | Command | What it does |
 |---|---|
@@ -212,12 +217,17 @@ After a few recaps in a brain:
 ## Folders
 
 ```
-recordings/   drop files here
-output/       finished Word notes
-processed/    originals + mp3 + transcript json, archived per run
-logs/         pipeline.log
-.env          your API key + default mode (never commit this)
+./catchup         CLI
+catchmeup/        Python package (pipeline, brains, cortex, MCP, …)
+recordings/       drop files here
+output/           finished Word notes
+processed/        originals + mp3 + transcript json, archived per run
+brains/           specialist agents (gitignored except README)
+logs/             pipeline.log
+.env              your API key + default mode (never commit this)
 ```
+
+Recaps and recordings live under `CATCHMEUP_HOME` (the repo root unless you set it). Code stays in `catchmeup/`.
 
 Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 
@@ -229,7 +239,7 @@ Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 |---|---|
 | `ffmpeg not found` | `brew install ffmpeg` then `./catchup doctor` |
 | `whisperkit-cli not found` | `brew install whisperkit-cli` then `./catchup doctor` |
-| `ANTHROPIC_API_KEY not set` / no API key | `./catchup config` then pick a company |
+| `ANTHROPIC_API_KEY not set` / no API key | `./catchup config anthropic` (paste a key) or `./catchup config ollama` |
 | Notes feel like a meeting but it was class | `./catchup lecture FILE` (or `./catchup mode lecture`) |
 | Notes feel like a lecture but it was work | `./catchup meeting FILE` |
 | File sits in `recordings/` | Size must be stable (still copying). Then `./catchup status` |
@@ -265,7 +275,7 @@ Full traceback lives in `logs/pipeline.log`.
 | `mistral` | Mistral |
 | `together` | Together AI |
 | `xai` | xAI Grok |
-| `ollama` | Ollama on your machine (no cloud key) |
+| `ollama` | Ollama on your machine (no cloud key). Default model: `qwen3.6:35b` |
 | `custom` | Any OpenAI-compatible base URL |
 
 `custom` example:
@@ -284,4 +294,4 @@ Recaps, brains, and cortex data honor `CATCHMEUP_HOME`, so the suite uses a temp
 python3 -m unittest discover -s tests -v
 ```
 
-That covers folder brains, isolation, cortex ingest/activate/think (LLM mocked), markdown + library search, MCP tools, and the CLI (`brain new/list/show`, `cortex`, `help`). It does **not** call ffmpeg, whisperkit-cli, or a live LLM — those need a real recording and `./catchup doctor` to go green.
+That covers folder brains, isolation, cortex ingest/activate/think (LLM mocked), markdown + library search, the clickable graph, MCP tools, and the CLI (`brain new/list/show`, `cortex`, `help`). It does **not** call ffmpeg, whisperkit-cli, or a live LLM — those need a real recording and `./catchup doctor` to go green.

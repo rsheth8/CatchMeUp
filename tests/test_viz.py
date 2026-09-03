@@ -4,8 +4,8 @@ from __future__ import annotations
 import os
 import unittest
 
-import cortex
-import viz
+from catchmeup import cortex
+from catchmeup import viz
 from tests.support import IsolatedHome, LECTURE_ANALYSIS
 
 

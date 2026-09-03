@@ -47,8 +47,12 @@ class CliTests(IsolatedHome):
         page = self.run_cli("help", "exam")
         self.assertIn("Practice test", page.stdout)
         self.assertIn("--print", page.stdout)
+        self.assertIn("drill", page.stdout.lower())
         rec = self.run_cli("help", "rec")
         self.assertIn("microphone", rec.stdout.lower())
+        self.assertIn("--system", rec.stdout)
+        speakers = self.run_cli("help", "speakers")
+        self.assertIn("Jordan", speakers.stdout)
         missing = self.run_cli("help", "not-a-real-command", check=False)
         self.assertNotEqual(missing.returncode, 0)
 
@@ -102,6 +106,10 @@ class CliTests(IsolatedHome):
         recs = list((self.home / "recordings").glob("rec-*.m4a"))
         self.assertTrue(recs)
         self.assertGreater(recs[0].stat().st_size, 200)
+        named = self.run_cli("speakers", "cs61a", "1=Ana")
+        self.assertIn("Ana", named.stdout)
+        shown = self.run_cli("speakers", "cs61a")
+        self.assertIn("Ana", shown.stdout)
 
     def test_demo_and_cortex_map(self):
         demo = self.run_cli("demo")
@@ -125,6 +133,8 @@ class CliTests(IsolatedHome):
         page = demo_html.read_text()
         self.assertIn("mutex", page)
         self.assertIn("id=\"hud\"", page)
+        self.assertIn("id=\"tip\"", page)
+        self.assertIn("function Spring", page)
 
     def test_walk_and_trace(self):
         self.seed_lecture("cs61a")

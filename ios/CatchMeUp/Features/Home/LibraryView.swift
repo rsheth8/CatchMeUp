@@ -42,6 +42,7 @@ struct LibraryView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppRouter.self) private var router
     @Environment(AudioOptimizer.self) private var optimizer
+    @Environment(ProcessingQueue.self) private var queue
 
     @State private var showImporter = false
     @State private var filter: LibraryFilter = .all
@@ -74,17 +75,6 @@ struct LibraryView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
-            .fullScreenCover(isPresented: Binding(
-                get: { router.recorderMode != nil },
-                set: { if !$0 { router.recorderMode = nil } }
-            )) {
-                if let mode = router.recorderMode {
-                    RecordView(initialMode: mode) { newID in
-                        router.recorderMode = nil
-                        router.libraryPath.append(newID)
-                    }
-                }
-            }
             .fileImporter(isPresented: $showImporter,
                           allowedContentTypes: [.audio, .mpeg4Audio, .mp3, .wav,
                                                 .mpeg4Movie, .movie, .quickTimeMovie],
@@ -120,6 +110,7 @@ struct LibraryView: View {
                             Button { router.libraryPath.append(rec.id) } label: {
                                 RecapRow(recording: rec,
                                          brainName: store.brain(rec.brainID)?.name,
+                                         job: queue.job(for: rec.id),
                                          isLit: rec.id == latestID,
                                          // first/last of the whole thread, so the
                                          // rail runs unbroken across chapters
@@ -166,6 +157,41 @@ struct LibraryView: View {
             Text(summary)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            if !weekLines.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(weekLines) { line in
+                        Button {
+                            Haptics.tap()
+                            router.libraryPath.append(line.recordingID)
+                        } label: {
+                            Label(line.text, systemImage: line.symbol)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.cardBG, in: RoundedRectangle(cornerRadius: Metric.tile, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Metric.tile, style: .continuous)
+                        .strokeBorder(Color.hairline)
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("This week")
+            }
+
+            if let working = queue.summary {
+                Label(working, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.brand)
+                    .transition(.opacity)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
 
             if showsFilters {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -286,6 +312,7 @@ struct LibraryView: View {
     private var recordButton: some View {
         Button {
             Haptics.tap(.medium)
+            router.recorderBrainID = nil
             router.recorderMode = settings.defaultMode
         } label: {
             HStack(spacing: 9) {
@@ -360,6 +387,10 @@ struct LibraryView: View {
                 Bucket(title: "Past week", items: week),
                 Bucket(title: "Earlier", items: earlier)]
             .filter { !$0.items.isEmpty }
+    }
+
+    private var weekLines: [WeekPulse.Line] {
+        WeekPulse.lines(from: store.sortedRecordings)
     }
 
     private var summary: String {
@@ -455,12 +486,15 @@ struct ThreadRowStyle: ButtonStyle {
 struct RecapRow: View {
     let recording: Recording
     var brainName: String?
+    /// Live state from the queue, when this recording is being worked on.
+    var job: ProcessingQueue.Job?
     /// The newest recap in the library — drawn as the lit node.
     var isLit = false
     var isFirst = true
     var isLast = true
 
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var nodeSize: CGFloat { isLit ? 26 : 11 }
     private var railTop: CGFloat { isLit ? 1 : 8 }
@@ -477,6 +511,34 @@ struct RecapRow: View {
             .padding(.vertical, 13)
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(recording.displayTitle)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    /// Everything the row says visually, in the order it's read.
+    private var accessibilityValue: String {
+        var parts: [String] = [recording.mode.title]
+        if let job, !job.phase.isFinished {
+            parts.append(job.displayLabel)
+            if job.phase.isActive {
+                let percent = job.overallProgress(
+                    ProcessingStatsStore.rates(for: AppSettings.shared.engineKind)
+                )
+                parts.append("\(Int(percent * 100)) percent")
+                if let eta = job.etaSeconds { parts.append("\(etaText(eta)) remaining") }
+            }
+        } else if recording.needsAttention {
+            parts.append("Couldn't finish the notes. Tap to retry.")
+        } else if !recording.isProcessed {
+            parts.append("Waiting to start")
+        } else if let gist = recording.recap?.tldr?.first, !gist.isEmpty {
+            parts.append(gist)
+        }
+        if recording.duration > 0 { parts.append(durationText(recording.duration)) }
+        parts.append(recording.createdAt.libraryStamp)
+        if let brainName { parts.append("in \(brainName)") }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: Spine
@@ -518,6 +580,9 @@ struct RecapRow: View {
                 .frame(width: nodeSize, height: nodeSize)
                 .opacity(pulse ? 0.3 : 1)
                 .onAppear {
+                    // Only breathes while something is actually happening — a
+                    // pulsing node on a stalled recording is a lie.
+                    guard !reduceMotion, job?.phase.isActive == true else { return }
                     withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
                         pulse = true
                     }
@@ -549,24 +614,55 @@ struct RecapRow: View {
 
     @ViewBuilder
     private var secondary: some View {
-        if recording.needsAttention {
+        if let job, !job.phase.isFinished {
+            liveProgress(job)
+        } else if recording.needsAttention {
             Label("Couldn't finish the notes — tap to retry", systemImage: "exclamationmark.triangle.fill")
                 .font(.subheadline)
                 .foregroundStyle(.orange)
                 .lineLimit(2)
         } else if !recording.isProcessed {
-            HStack(spacing: 7) {
-                ProgressView().controlSize(.mini)
-                Text("Writing your notes…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            // No job and no notes means nothing is running. The old row claimed
+            // "Writing your notes…" here, complete with a spinner, for a
+            // recording that had been sitting untouched since a suspend.
+            Label("Waiting to start — open to begin", systemImage: "clock")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         } else if let gist = recording.recap?.tldr?.first, !gist.isEmpty {
             Text(gist)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+        }
+    }
+
+    /// The stage, a real percentage and what's left of it — the same numbers the
+    /// recap screen and the Live Activity are showing.
+    private func liveProgress(_ job: ProcessingQueue.Job) -> some View {
+        let rates = ProcessingStatsStore.rates(for: AppSettings.shared.engineKind)
+        let progress = job.overallProgress(rates)
+        let paused = job.phase == .paused
+
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: job.phase.symbol)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(paused ? Color.secondary : recording.mode.accent)
+                Text(job.displayLabel)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let eta = job.etaSeconds, job.phase.isActive {
+                    Text("· \(etaText(eta))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
+            }
+            ProgressView(value: progress)
+                .tint(paused ? .secondary : recording.mode.accent)
+                .animation(.gentle, value: progress)
         }
     }
 

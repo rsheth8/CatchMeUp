@@ -29,20 +29,47 @@ enum Mode: String, Codable, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Role instruction handed to the model, ported from the CLI pipeline.
+    /// How a *brain* describes this kind of life. Recaps stay Meeting / Lecture;
+    /// brains are the filing cabinet, so the words are Course / Work.
+    var brainKindTitle: String {
+        switch self {
+        case .meeting: return "Work"
+        case .lecture: return "Course"
+        }
+    }
+
+    var brainKindSection: String {
+        switch self {
+        case .meeting: return "Work"
+        case .lecture: return "Courses"
+        }
+    }
+
+    /// Role instruction handed to the model. Dominant job first, but the other
+    /// half of the schema is fair game when the transcript actually has it —
+    /// office hours and tech talks are both common, and "do not write as a
+    /// meeting" used to throw away the follow-ups that were in the room.
     var roleInstruction: String {
+        let both = """
+        Also extract any follow-ups, owners and deadlines you can actually hear, \
+        and any definitions, formulas or exam-style material that is actually taught. \
+        Leave a section empty rather than inventing names, owners, or exam claims.
+        """
         switch self {
         case .lecture:
             return """
-            You are writing notes for a student who missed this recorded lecture. \
-            Teach the material: definitions, examples, formulas, and what is likely to show up on a quiz or exam. \
-            Do not write as if this were a business meeting.
+            You are writing notes for someone who missed this recording. \
+            Lead with teaching: definitions, examples, formulas, and what is likely \
+            to show up on a quiz or exam.
+            \(both)
             """
         case .meeting:
             return """
-            You are analyzing a transcript of a work meeting (standup, Zoom, client call, 1:1). \
-            Write notes for someone who did not attend: decisions, owners, deadlines, and follow-ups. \
-            Lines may be labeled Speaker 1, Speaker 2, … — use those labels in action items and speakers[].
+            You are writing notes for someone who missed this recording. \
+            Lead with decisions, owners, deadlines and follow-ups. \
+            Lines may be labeled Speaker 1, Speaker 2, … — use those labels in \
+            action items and speakers[].
+            \(both)
             """
         }
     }
@@ -153,13 +180,30 @@ struct Recap: Codable, Hashable {
         if let data = text.data(using: .utf8), let r = try? decoder.decode(Recap.self, from: data) {
             return r
         }
-        if let open = text.firstIndex(of: "{"), let close = text.lastIndex(of: "}") {
-            let slice = String(text[open...close])
-            if let data = slice.data(using: .utf8) {
-                return try decoder.decode(Recap.self, from: data)
-            }
+        // Prose either side of the object is the usual failure, so fall back to
+        // the outermost braces. Anything past that is a retry's problem —
+        // callers key off `badResponse`, so a `DecodingError` must never escape.
+        if let open = text.firstIndex(of: "{"), let close = text.lastIndex(of: "}"), open < close,
+           let data = String(text[open...close]).data(using: .utf8),
+           let r = try? decoder.decode(Recap.self, from: data) {
+            return r
         }
         throw EngineError.badResponse
+    }
+
+    /// Follow-ups / people — the work job. Empty arrays don't count.
+    var hasCommitments: Bool {
+        !(actionItems ?? []).isEmpty || !(speakers ?? []).isEmpty
+    }
+
+    /// Glossary / study — the school job.
+    var hasKnowledge: Bool {
+        !(terms ?? []).isEmpty || !(study ?? []).isEmpty
+    }
+
+    /// The other job relative to a recap's dominant mode, for progressive disclosure.
+    func hasSecondaryJob(dominant: Mode) -> Bool {
+        dominant == .lecture ? hasCommitments : hasKnowledge
     }
 }
 
@@ -333,6 +377,7 @@ enum EngineError: LocalizedError {
     case badResponse
     case missingKey
     case onDeviceUnavailable(String)
+    case emptyTranscript
     case http(Int, String)
 
     var errorDescription: String? {
@@ -340,6 +385,7 @@ enum EngineError: LocalizedError {
         case .badResponse: return "The model didn't return notes we could read. Try again."
         case .missingKey: return "Add your API key in Settings, or switch to Demo or On-device."
         case .onDeviceUnavailable(let why): return why
+        case .emptyTranscript: return "There was no speech in this recording to write notes from."
         case .http(let code, let body):
             let short = body.prefix(200)
             return "The provider returned an error (\(code)). \(short)"

@@ -5,9 +5,17 @@ struct LLMClient {
     let config: ProviderConfig
 
     func complete(system: String, user: String, maxTokens: Int = 8000) async throws -> String {
-        switch config.kind {
-        case .anthropic: return try await anthropic(system: system, user: user, maxTokens: maxTokens)
-        case .openai:    return try await openAICompatible(system: system, user: user, maxTokens: maxTokens)
+        do {
+            switch config.kind {
+            case .anthropic: return try await anthropic(system: system, user: user, maxTokens: maxTokens)
+            case .openai:    return try await openAICompatible(system: system, user: user, maxTokens: maxTokens)
+            }
+        } catch let error as URLError where error.code == .cancelled {
+            // `URLSession` reports cancellation its own way. The queue decides
+            // between "park this and finish later" and "tell the user it
+            // failed" by catching `CancellationError`, so translate it here
+            // rather than showing an error for work we chose to stop.
+            throw CancellationError()
         }
     }
 

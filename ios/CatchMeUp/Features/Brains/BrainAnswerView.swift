@@ -103,7 +103,10 @@ struct QuestionBubble: View {
 struct BrainAnswerCard: View {
     let raw: String
     let tint: Color
+    /// Only the recaps retrieval sent to the model, so a chip always points at
+    /// something the answer could actually have come from.
     let recaps: [Recording]
+    let clipped: Bool
     let onRetry: () -> Void
 
     @State private var copied = false
@@ -111,11 +114,13 @@ struct BrainAnswerCard: View {
     private let answer: BrainAnswer
     private let sources: [Recording]
 
-    init(raw: String, tint: Color, recaps: [Recording], onRetry: @escaping () -> Void) {
+    init(raw: String, tint: Color, recaps: [Recording],
+         clipped: Bool = false, onRetry: @escaping () -> Void) {
         let parsed = BrainAnswer(raw: raw, recaps: recaps)
         self.raw = raw
         self.tint = tint
         self.recaps = recaps
+        self.clipped = clipped
         self.onRetry = onRetry
         self.answer = parsed
         self.sources = parsed.sourceIDs.compactMap { id in recaps.first { $0.id == id } }
@@ -131,9 +136,23 @@ struct BrainAnswerCard: View {
                     sourceChips
                 }
 
+                if clipped { clippedNotice }
+
                 actions
             }
         }
+    }
+
+    /// The brain had more matching material than fit. Saying so is the
+    /// difference between a partial answer and an answer that looks complete.
+    private var clippedNotice: some View {
+        Label(
+            "This brain has more material than fits in one answer — ask something narrower for the rest.",
+            systemImage: "info.circle"
+        )
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var style: MarkdownStyle {
@@ -240,12 +259,14 @@ struct BrainThinkingCard: View {
          "Writing your answer"]
     }
 
+    private var currentStage: String { stages[min(step, stages.count - 1)] }
+
     var body: some View {
         Card(tint: tint) {
             VStack(alignment: .leading, spacing: 15) {
                 HStack(spacing: 10) {
                     PulseGlyph(tint: tint)
-                    Text(stages[min(step, stages.count - 1)])
+                    Text(currentStage)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
                         .id(step)
@@ -254,13 +275,20 @@ struct BrainThinkingCard: View {
                     Spacer(minLength: 0)
                 }
 
+                // Decoration standing in for text that hasn't arrived. VoiceOver
+                // gets the stage instead, which is the part that means anything.
                 VStack(alignment: .leading, spacing: 9) {
                     ShimmerLine()
                     ShimmerLine(width: 236)
                     ShimmerLine(width: 172)
                 }
+                .accessibilityHidden(true)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Working on your answer")
+        .accessibilityValue(currentStage)
+        .accessibilityAddTraits(.updatesFrequently)
         .task {
             while !Task.isCancelled && step < stages.count - 1 {
                 do { try await Task.sleep(nanoseconds: 2_400_000_000) } catch { return }
@@ -273,6 +301,7 @@ struct BrainThinkingCard: View {
 private struct PulseGlyph: View {
     let tint: Color
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -285,6 +314,7 @@ private struct PulseGlyph: View {
         }
         .frame(width: 24, height: 24)
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
         }
     }
@@ -293,6 +323,7 @@ private struct PulseGlyph: View {
 private struct TypingDots: View {
     let tint: Color
     @State private var lit = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 4) {
@@ -304,6 +335,7 @@ private struct TypingDots: View {
             }
         }
         .task {
+            guard !reduceMotion else { return }
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 280_000_000) } catch { return }
                 withAnimation(.easeInOut(duration: 0.26)) { lit = (lit + 1) % 3 }

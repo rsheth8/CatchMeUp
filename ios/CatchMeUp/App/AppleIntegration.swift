@@ -4,6 +4,7 @@ import Foundation
 import Observation
 import UniformTypeIdentifiers
 import UIKit
+import UserNotifications
 
 // MARK: - Links and navigation
 
@@ -49,6 +50,7 @@ final class AppRouter {
     var brainGraphID: UUID?
     var libraryQuery = ""
     var recorderMode: Mode?
+    var recorderBrainID: UUID?
 
     func open(_ url: URL) {
         guard url.scheme?.lowercased() == CatchMeUpLink.scheme else { return }
@@ -72,6 +74,7 @@ final class AppRouter {
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let rawMode = components?.queryItems?.first(where: { $0.name == "mode" })?.value
             recorderMode = Mode(rawValue: rawMode ?? "") ?? .meeting
+            recorderBrainID = nil
         case "search":
             selectedTab = .library
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -158,6 +161,18 @@ enum SpotlightIndexer {
 // MARK: - Home Screen quick actions
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Both of these have to happen before launch completes: `BGTaskScheduler`
+        // throws if an identifier is registered late, and a notification tapped
+        // from a cold start is delivered to the delegate almost immediately.
+        BackgroundRefresh.register()
+        UNUserNotificationCenter.current().delegate = NotificationRouter.shared
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,

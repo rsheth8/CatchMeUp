@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecordView: View {
     let initialMode: Mode
+    var brainID: UUID?
     let onFinish: (UUID) -> Void
 
     @Environment(LibraryStore.self) private var store
@@ -14,8 +15,9 @@ struct RecordView: View {
     @State private var didStart = false
     @State private var confirmDiscard = false
 
-    init(initialMode: Mode, onFinish: @escaping (UUID) -> Void) {
+    init(initialMode: Mode, brainID: UUID? = nil, onFinish: @escaping (UUID) -> Void) {
         self.initialMode = initialMode
+        self.brainID = brainID
         self.onFinish = onFinish
         _mode = State(initialValue: initialMode)
     }
@@ -252,7 +254,8 @@ struct RecordView: View {
         let rec = Recording(title: "\(mode.title) · \(Date().formatted(date: .abbreviated, time: .shortened))",
                             mode: mode,
                             audioFilename: url.lastPathComponent,
-                            duration: elapsed)
+                            duration: elapsed,
+                            brainID: brainID)
         store.upsert(rec)
         onFinish(rec.id)
 

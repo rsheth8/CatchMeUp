@@ -287,6 +287,7 @@ struct WaveMark: View {
     var tint: Color = .brand
     var animated = false
     @State private var phase = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let base: [CGFloat] = [0.34, 0.62, 1.0, 0.55, 0.40]
     private let alt: [CGFloat]  = [0.52, 0.34, 0.72, 1.0, 0.46]
@@ -306,9 +307,10 @@ struct WaveMark: View {
             .frame(width: w, height: h)
         }
         .onAppear {
-            guard animated else { return }
+            guard animated, !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { phase = true }
         }
+        .accessibilityHidden(true)
     }
 }
 
@@ -322,6 +324,7 @@ struct BrandMark: View {
     var animated = false
 
     @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let degs: [Double] = [56, 118, 180, 242, 304]
     private let lit = 2
@@ -382,9 +385,10 @@ struct BrandMark: View {
         .scaleEffect(appeared ? 1 : 0.86)
         .opacity(appeared ? 1 : 0)
         .onAppear {
-            guard animated else { appeared = true; return }
+            guard animated, !reduceMotion else { appeared = true; return }
             withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) { appeared = true }
         }
+        .accessibilityLabel("CatchMeUp")
     }
 }
 
@@ -393,23 +397,30 @@ struct BrandMark: View {
 struct ShimmerLine: View {
     var width: CGFloat?
     @State private var move = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Capsule()
             .fill(Color.primary.opacity(0.07))
             .frame(width: width, height: 11)
             .overlay {
-                GeometryReader { geo in
-                    Capsule()
-                        .fill(LinearGradient(colors: [.clear, Color.primary.opacity(0.09), .clear],
-                                             startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * 0.5)
-                        .offset(x: move ? geo.size.width : -geo.size.width * 0.5)
+                // With Reduce Motion on this is a plain grey bar. It's a
+                // placeholder either way; the sweep was never the information.
+                if !reduceMotion {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(LinearGradient(colors: [.clear, Color.primary.opacity(0.09), .clear],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * 0.5)
+                            .offset(x: move ? geo.size.width : -geo.size.width * 0.5)
+                    }
                 }
             }
             .clipShape(Capsule())
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) { move = true }
             }
+            .accessibilityHidden(true)
     }
 }

@@ -31,7 +31,7 @@ enum CloudSync {
             case .off: return "Off — recaps stay on this iPhone."
             case .unavailable: return "Sign in to iCloud on this device to turn on sync."
             case .syncing: return "Syncing with iCloud…"
-            case .synced: return "On — recaps sync across your devices."
+            case .synced: return "On — recaps sync with your Mac and other Apple devices."
             }
         }
 

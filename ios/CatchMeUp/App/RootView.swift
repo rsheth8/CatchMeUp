@@ -6,6 +6,9 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        @Bindable var router = router
+        @Bindable var settings = settings
+
         appleTabs
             .onChange(of: router.selectedTab) { _, _ in Haptics.tap(.soft) }
             .onOpenURL { router.open($0) }
@@ -23,6 +26,25 @@ struct RootView: View {
             )) {
                 OnboardingView()
                     .interactiveDismissDisabled()
+            }
+            .fullScreenCover(isPresented: Binding(
+                get: { router.recorderMode != nil },
+                set: { if !$0 { router.recorderMode = nil; router.recorderBrainID = nil } }
+            )) {
+                if let mode = router.recorderMode {
+                    RecordView(initialMode: mode, brainID: router.recorderBrainID) { newID in
+                        let brainID = router.recorderBrainID
+                        router.recorderMode = nil
+                        router.recorderBrainID = nil
+                        if let brainID {
+                            router.selectedTab = .brains
+                            router.brainPath = [brainID, newID]
+                        } else {
+                            router.selectedTab = .library
+                            router.libraryPath.append(newID)
+                        }
+                    }
+                }
             }
     }
 

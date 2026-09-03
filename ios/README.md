@@ -22,6 +22,17 @@ xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
 
+### Unit tests
+
+`CatchMeUpTests` covers the logic that has no UI to check it by eye: transcript chunking and
+recap merging, retrieval ranking and budgeting, lenient JSON parsing, guided-generation
+cleanup and prompt assembly, and the progress and time-remaining maths.
+
+```bash
+xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
 ### Test with your existing CLI library
 
 Build and launch the app in a Simulator once, then from the repository root run:
@@ -55,7 +66,7 @@ without changing the Simulator.
 | Library: search across notes, mode filters, date grouping, swipe-delete, rename | ✅ |
 | Record from mic (`AVAudioRecorder`) with live waveform + pause/resume; import a file | ✅ |
 | On-device transcription with timestamps (`SFSpeechRecognizer`) | ✅ |
-| Recap engine — **Demo**, **Your API key** (Anthropic + any OpenAI-compatible), **On-device** (iOS 26 Foundation Models) | ✅ |
+| Recap engine — **Demo**, **Your API key** (Anthropic + any OpenAI-compatible), **On-device** (iOS 26 Foundation Models, guided generation via `@Generable`) | ✅ |
 | Meeting + lecture recap views, tickable action items, scrubbing player, searchable transcript, Markdown share | ✅ |
 | Brains: create, assign recaps, ask (scoped RAG) as a conversation, persona | ✅ |
 | API key stored in Keychain; audio never leaves the device | ✅ |
@@ -89,9 +100,13 @@ the `**` and `##` instead of the formatting. Both take a `MarkdownStyle`, whose
 Off by default. Turn it on in **Settings ▸ Sync**. It uses the app's iCloud Drive
 ubiquity container (`iCloud.com.catchmeup.app`): the `recordings.json` / `brains.json`
 library and the `audio/` folder live there and Apple syncs them across the user's
-devices. Merge is union-by-id, newest `updatedAt` wins; deletes are tombstoned so
+devices — including the Mac CLI, which reads and writes that same folder with
+`./catchup sync`. Merge is union-by-id, newest `updatedAt` wins; deletes are tombstoned so
 they propagate instead of resurrecting. Live updates come from an `NSMetadataQuery`;
 a merge also runs on foreground.
+
+On the Mac, recaps also push themselves after `./catchup lecture` / `into` whenever
+this folder already exists. `ios/tools/load_cli_data.py` is only for the Simulator.
 
 First build with your own team: Xcode will offer to enable the **iCloud** capability
 and create the container — accept it. On the Simulator (no iCloud account / stripped
@@ -103,9 +118,14 @@ entitlement) the toggle shows "Sign in to iCloud…" and the app stays local —
 - Siri and the Shortcuts app expose **Record Meeting**, **Record Lecture**, and **Search Recaps**.
 - Long-press the app icon for the same recording and search quick actions.
 - While CatchMeUp transcribes and writes notes, progress appears as a Live Activity and in the
-  Dynamic Island on supported iPhones. Tapping it returns to the recap.
+  Dynamic Island on supported iPhones, with an estimated time remaining. Tapping it returns to
+  the recap.
 - Recording uses Apple's background audio mode, so locking the iPhone or briefly switching apps
   does not cut off a meeting or lecture.
+- Processing is not tied to the screen that started it. Jobs run one at a time on an app-scoped
+  queue, hold a background assertion so leaving the app doesn't suspend them mid-transcription,
+  and fall back to a `BGProcessingTask` when iOS reclaims the time. A local notification arrives
+  when notes are ready if you're no longer in the app.
 - Open recaps advertise a private Handoff activity so they can continue on another signed-in device.
 - Each meeting action item's menu can add that follow-up to the default Apple Reminders list.
 
@@ -124,11 +144,15 @@ CatchMeUp/
   Models/         Recording, Transcript, Recap, Brain, Mode
   Persistence/    LibraryStore — JSON in Application Support
   Settings/       AppSettings, provider list, Keychain
-  Engine/         Prompts, LLMClient, RecapEngine (Demo / Cloud / Apple on-device)
+  Engine/         Prompts, LLMClient, RecapEngine (Demo / Cloud / Apple on-device),
+                  OnDeviceRecap (@Generable schema for Apple Intelligence),
+                  RecapChunking (long transcripts), Retrieval (ranked context for asks)
   Transcription/  SpeechTranscriber (on-device) + Mock
   Audio/          recorder + player
-  Pipeline/       RecapPipeline — transcribe → recap → save
+  Pipeline/       ProcessingQueue — transcribe → recap → save, plus background
+                  assertions, BGProcessingTask resumption and time estimates
   Design/         Theme (tokens) + Design (components)
   Features/       Onboarding, Home (library + recorder), Recap, Brains, Settings
   Sample/         demo recaps
+CatchMeUpTests/   unit tests for chunking, merging, retrieval and estimates
 ```

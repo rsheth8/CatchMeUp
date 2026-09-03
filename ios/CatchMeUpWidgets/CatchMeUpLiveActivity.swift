@@ -32,17 +32,20 @@ struct CatchMeUpLiveActivity: Widget {
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                         HStack {
-                            Text(context.state.stage)
+                            Text(subtitle(context))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                             Spacer()
-                            if !context.state.isComplete {
+                            if !context.state.isComplete, !context.state.isPaused {
                                 ProgressView(value: context.state.progress)
                                     .tint(accent(context))
                                     .frame(width: 78)
                             }
                         }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(voiceOverLabel(context))
                 }
             } compactLeading: {
                 Image(systemName: context.state.symbol)
@@ -60,7 +63,7 @@ struct CatchMeUpLiveActivity: Widget {
 
     @ViewBuilder
     private func progressLabel(_ context: ActivityViewContext<CatchMeUpActivityAttributes>) -> some View {
-        if context.state.isComplete {
+        if context.state.isComplete || context.state.isPaused {
             Image(systemName: context.state.symbol)
                 .foregroundStyle(accent(context))
         } else {
@@ -75,6 +78,22 @@ struct CatchMeUpLiveActivity: Widget {
             ? Color(red: 0.92, green: 0.66, blue: 0.28)
             : Color(red: 0.38, green: 0.83, blue: 0.75)
     }
+
+    private func subtitle(_ context: ActivityViewContext<CatchMeUpActivityAttributes>) -> String {
+        guard let eta = context.state.etaText, !context.state.isComplete else {
+            return context.state.stage
+        }
+        return "\(context.state.stage) · \(eta)"
+    }
+
+    private func voiceOverLabel(_ context: ActivityViewContext<CatchMeUpActivityAttributes>) -> String {
+        var parts = [context.attributes.title, context.state.stage]
+        if !context.state.isComplete, !context.state.isPaused {
+            parts.append("\(Int(context.state.progress * 100)) percent")
+        }
+        if let eta = context.state.etaText { parts.append(eta) }
+        return parts.joined(separator: ", ")
+    }
 }
 
 private struct LockScreenActivityView: View {
@@ -86,6 +105,8 @@ private struct LockScreenActivityView: View {
             : Color(red: 0.38, green: 0.83, blue: 0.75)
     }
 
+    private var showsBar: Bool { !context.state.isComplete && !context.state.isPaused }
+
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: context.state.symbol)
@@ -94,27 +115,52 @@ private struct LockScreenActivityView: View {
                 .frame(width: 42, height: 42)
                 .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(context.attributes.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(context.state.stage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
 
-            Spacer(minLength: 8)
+                HStack(spacing: 5) {
+                    Text(context.state.stage)
+                    if let eta = context.state.etaText, showsBar {
+                        Text("·")
+                        Text(eta).monospacedDigit()
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+                // A determinate bar is the honest shape here: the percentage is
+                // real, and a spinner would imply we have no idea.
+                if showsBar {
+                    ProgressView(value: context.state.progress)
+                        .tint(tint)
+                }
+            }
 
             if context.state.isComplete {
                 Text("Ready")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(tint)
-            } else {
-                ProgressView(value: context.state.progress)
-                    .progressViewStyle(.circular)
-                    .tint(tint)
+            } else if showsBar {
+                Text("\(Int(context.state.progress * 100))%")
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(tint)
             }
         }
         .padding(16)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(context.attributes.title)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        var parts = [context.state.stage]
+        if showsBar {
+            parts.append("\(Int(context.state.progress * 100)) percent")
+            if let eta = context.state.etaText { parts.append(eta) }
+        }
+        return parts.joined(separator: ", ")
     }
 }

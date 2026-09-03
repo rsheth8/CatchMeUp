@@ -7,6 +7,12 @@ struct CatchMeUpActivityAttributes: ActivityAttributes {
         var progress: Double
         var symbol: String
         var isComplete: Bool
+        /// "about 2 min left", already phrased for display. Nil when we don't
+        /// know — an empty slot reads better than a fabricated number.
+        var etaText: String?
+        /// Waiting on background time. Drawn differently so a stalled
+        /// percentage doesn't masquerade as live progress.
+        var isPaused: Bool = false
     }
 
     var recordingID: String

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Load the local CatchMeUp CLI library into an installed iOS Simulator app.
 
+This is a development helper. Real phones share a library with the Mac through
+iCloud Drive — use `./catchup sync push` (and Settings ▸ Sync in the app).
+
 The import is additive by default, creates a backup inside the Simulator
 container, and never edits the CLI library. Audio is opt-in because a real
 library can be several gigabytes while recaps and transcripts are small.

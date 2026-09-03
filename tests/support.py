@@ -102,11 +102,22 @@ class IsolatedHome(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self._prev_env = {
-            key: os.environ.get(key) for key in ("CATCHMEUP_HOME", "CATCHMEUP_CLOSED", "CATCHMEUP_MODE")
+            key: os.environ.get(key)
+            for key in (
+                "CATCHMEUP_HOME",
+                "CATCHMEUP_CLOSED",
+                "CATCHMEUP_MODE",
+                "CATCHMEUP_SYNC",
+                "CATCHMEUP_SYNC_DIR",
+                "CATCHMEUP_SYNC_AUDIO",
+            )
         }
         os.environ["CATCHMEUP_HOME"] = str(self.home)
         os.environ.pop("CATCHMEUP_CLOSED", None)
         os.environ.pop("CATCHMEUP_MODE", None)
+        os.environ.pop("CATCHMEUP_SYNC_DIR", None)
+        os.environ.pop("CATCHMEUP_SYNC_AUDIO", None)
+        os.environ["CATCHMEUP_SYNC"] = "0"
         for name in ("recordings", "output", "processed", "logs", "brains"):
             (self.home / name).mkdir(parents=True, exist_ok=True)
 

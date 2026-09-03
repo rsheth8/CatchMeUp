@@ -90,9 +90,16 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(report.isProblem ? .orange : .secondary)
                     } else {
-                        Label(store.syncStatus.text, systemImage: store.syncStatus.symbolName)
-                            .font(.footnote)
-                            .foregroundStyle(store.syncStatus.isProblem ? .orange : .secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(store.syncStatus.text, systemImage: store.syncStatus.symbolName)
+                                .font(.footnote)
+                                .foregroundStyle(store.syncStatus.isProblem ? .orange : .secondary)
+                            if store.syncEnabled, !store.syncStatus.isProblem {
+                                Text("On the Mac, recaps land here after `./catchup lecture` — or send them with `./catchup sync push`.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
                 }
 

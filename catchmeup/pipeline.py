@@ -603,7 +603,9 @@ def ingest_limit() -> int | None:
     return n if n > 0 else None
 
 
-def process_recording(source: Path, mode: str | None, brain_slug: str | None) -> None:
+def process_recording(
+    source: Path, mode: str | None, brain_slug: str | None, sync: bool = True
+) -> None:
     from .providers import active_provider, resolve_api_key
     from . import viz
 
@@ -660,6 +662,23 @@ def process_recording(source: Path, mode: str | None, brain_slug: str | None) ->
     print(viz.pipeline_track("done"), flush=True)
     print(viz.recap_card(analysis, mode, md_path, docx_path), flush=True)
     notify("CatchMeUp", f"Done: {docx_path.name} is ready in output/")
+    if sync:
+        sync_after_recap(brain_slug)
+
+
+def sync_after_recap(brain_slug: str | None) -> None:
+    """Opportunistic push so a Mac recap lands on the iPhone without extra steps."""
+    try:
+        from . import sync as sync_mod
+
+        report = sync_mod.auto_push(brain=brain_slug)
+    except Exception:
+        return
+    if report is None:
+        return
+    verb = "Synced to iPhone" if not report.dry_run else "Would sync"
+    print(f"{verb}: {report.converted} recap(s).", flush=True)
+    log(f"auto-push {report.converted} recap(s) -> {report.folder}")
 
 
 def process_folder(folder: Path, mode: str | None, brain_slug: str | None) -> int:
@@ -679,12 +698,14 @@ def process_folder(folder: Path, mode: str | None, brain_slug: str | None) -> in
     for i, path in enumerate(pending, 1):
         print(f"\n[{i}/{len(pending)}] {path.name}", flush=True)
         try:
-            process_recording(path, mode, brain_slug)
+            process_recording(path, mode, brain_slug, sync=False)
         except Exception:
             failed += 1
             log(f"ERROR: {path.name}\n" + traceback.format_exc())
             notify("CatchMeUp FAILED", f"{path.name} - see logs/pipeline.log")
             print(f"Failed: {path.name} — continuing", flush=True)
+    if failed < len(pending):
+        sync_after_recap(brain_slug)
     if failed:
         log(f"Folder ingest finished with {failed} failure(s) of {len(pending)}")
         return 1

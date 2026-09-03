@@ -182,6 +182,8 @@ struct BrainDetailView: View {
     @State private var showPersona = false
     @State private var personaDraft = ""
     @State private var showGraph = false
+    @State private var showExam = false
+    @State private var showClip = false
 
     struct QAExchange: Identifiable, Equatable {
         let id = UUID()
@@ -206,6 +208,7 @@ struct BrainDetailView: View {
                     if let brain {
                         personaCard(brain)
                         neuralMapCard(brain)
+                        studyTools(brain)
 
                         if thread.isEmpty {
                             starters(brain)
@@ -244,6 +247,14 @@ struct BrainDetailView: View {
                     Button { personaDraft = brain?.persona ?? ""; showPersona = true } label: {
                         Label("Edit persona", systemImage: "theatermasks")
                     }
+                    Button { showExam = true } label: {
+                        Label("Practice exam", systemImage: "graduationcap")
+                    }
+                    .disabled(store.recordings(inBrain: brainID).allSatisfy { $0.recap == nil })
+                    Button { showClip = true } label: {
+                        Label("Hear a concept", systemImage: "waveform")
+                    }
+                    .disabled(store.recordings(inBrain: brainID).isEmpty)
                     if !thread.isEmpty {
                         Button(role: .destructive) { withAnimation(.quick) { thread = [] } } label: {
                             Label("Clear conversation", systemImage: "eraser")
@@ -257,6 +268,13 @@ struct BrainDetailView: View {
             if let brain {
                 BrainGraphScreen(brain: brain, recordings: store.recordings(inBrain: brainID))
             }
+        }
+        .sheet(isPresented: $showExam) {
+            ExamView(recordings: store.recordings(inBrain: brainID),
+                     accent: accent, brainName: brain?.name ?? "this brain")
+        }
+        .sheet(isPresented: $showClip) {
+            ClipSheet(recordings: store.recordings(inBrain: brainID), accent: accent)
         }
     }
 
@@ -343,6 +361,43 @@ struct BrainDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(graph.nodes.isEmpty)
+    }
+
+    private func studyTools(_ brain: Brain) -> some View {
+        let recs = store.recordings(inBrain: brainID)
+        let canExam = recs.contains { $0.recap != nil }
+        return HStack(spacing: 10) {
+            studyTool(symbol: "graduationcap", title: "Exam",
+                      subtitle: canExam ? "From these lectures" : "Needs recaps",
+                      enabled: canExam) { showExam = true }
+            studyTool(symbol: "waveform", title: "Clip",
+                      subtitle: recs.isEmpty ? "Needs recaps" : "Jump to the audio",
+                      enabled: !recs.isEmpty) { showClip = true }
+        }
+    }
+
+    private func studyTool(symbol: String, title: String, subtitle: String,
+                           enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                IconTile(symbol: symbol, tint: accent, size: 36)
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.cardBG, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
+                    .strokeBorder(Color.hairline)
+            }
+            .opacity(enabled ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 
     @ViewBuilder

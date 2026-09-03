@@ -1,35 +1,80 @@
-# CatchMeUp
+<p align="center">
+  <img src="docs/hero.jpg" alt="CatchMeUp — Missed the Zoom. Missed lecture. Still got the notes." width="100%">
+</p>
 
-**Missed the Zoom. Missed lecture. Still got the notes.**
+<p align="center">
+  <img src="docs/logo.png" width="88" alt="CatchMeUp constellation C">
+</p>
 
-One macOS CLI for two lives:
+<h1 align="center">CatchMeUp</h1>
 
-| You | Drop in | You get |
-|---|---|---|
-| **Full-time / intern** | Zoom, Meet, standup, 1:1, client call | TL;DR, decisions, **action items**, timestamped bookmarks |
-| **Student** | Recorded lecture, seminar, discussion section | What you missed, **terms**, lecture notes, **study / exam checklist** |
+<p align="center">
+  <strong>Missed the Zoom. Missed lecture. Still got the notes.</strong>
+</p>
 
-Same engine either way — only the recap style changes:
+<p align="center">
+  A local-first recap engine for people who skip the live session and still have to own what was said.
+  Batch a week of recordings on the Mac. Carry the same library on iPhone.
+</p>
 
-```
-recording  →  ffmpeg (mp3)  →  whisperkit-cli (on-device transcript)  →  your LLM  →  output/*_notes.docx
-```
-
-Bring **your own API key** from Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together, xAI, local Ollama, or any OpenAI-compatible endpoint.
-
-The command is `./catchup`.
+<p align="center">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-CLI-0E7C86?style=flat-square">
+  <img alt="iOS 17+" src="https://img.shields.io/badge/iPhone-iOS%2017%2B-0E7C86?style=flat-square">
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-0E7C86?style=flat-square">
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-SwiftUI-0E7C86?style=flat-square">
+  <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-0E7C86?style=flat-square">
+</p>
 
 ---
 
-## Send this to someone
+## Why it exists
 
-1. Share the GitHub repo. **Do not send your `.env`** — that file has your API key.
-2. They need a Mac and [Homebrew](https://brew.sh). For notes they can paste a key (`./catchup config anthropic`) **or** stay local with no key: install [Ollama](https://ollama.com), then `./catchup config ollama` and `ollama pull qwen3.6:35b`.
-3. `./catchup doctor` tells them if anything is missing.
+Live-capture tools assume you were in the room. CatchMeUp assumes you were not.
+
+Drop a Zoom export, a lecture capture, or a folder of OCW videos. Audio is transcribed **on your Mac** with WhisperKit. Notes are written by **your** LLM — Anthropic, OpenAI, Gemini, Groq, or local Ollama. The same recaps, brains, exams, and clips live on the iPhone through iCloud Drive.
+
+| You | Drop in | You get |
+|---|---|---|
+| **Work** | Zoom, Meet, standup, 1:1, client call | TL;DR, decisions, **action items**, timestamped bookmarks |
+| **School** | Recorded lecture, seminar, discussion | What you missed, **terms**, lecture notes, **study / exam checklist** |
+
+Same pipeline either way — only the recap style changes:
+
+```
+recording  →  ffmpeg (mp3)  →  whisperkit-cli (on-device)  →  your LLM  →  Word + Markdown
+```
+
+Long lectures are split on timestamps, recapped in passes, then merged. Bring your own API key. Audio never leaves the device.
+
+The command is `./catchup`. The iPhone app is in [`ios/`](ios/README.md).
+
+---
+
+## Two surfaces, one library
+
+<p align="center">
+  <img src="docs/logo.png" width="48" alt="">
+</p>
+
+| | **Mac CLI** | **iPhone** |
+|---|---|---|
+| For | A week of files, folders, watch folders | Record in class, replay on the train |
+| Transcribe | WhisperKit (on-device) | Apple Speech (on-device) |
+| Recap | Your cloud LLM or Ollama | Demo / your key / Apple on-device |
+| After | `exam`, `clip`, `think`, `cortex`, `sync` | Exam, Clip, Ask, player, iCloud |
+
+```bash
+./catchup lecture ~/Downloads/week3.mp4
+./catchup sync              # same notes on the phone
+```
+
+On the phone: **Settings ▸ Sync**, same Apple Account. Recaps auto-push after a CLI run once that iCloud folder exists. `CATCHMEUP_SYNC=0` opts out.
 
 ---
 
 ## Install (about 5 minutes)
+
+You need a Mac and [Homebrew](https://brew.sh). **Do not share your `.env`** — that file is the API key.
 
 ```bash
 git clone https://github.com/rsheth8/CatchMeUp.git
@@ -40,22 +85,17 @@ chmod +x catchup watch_and_process.sh
 
 `./catchup setup` installs the two packages this cannot run without:
 
-```bash
-brew install ffmpeg
-brew install whisperkit-cli
-```
-
 | Package | What it does |
 |---|---|
-| **ffmpeg** | Converts `.mov` / `.mp4` / `.m4a` / … into an `.mp3` WhisperKit can read |
-| **whisperkit-cli** | On-device transcription with timestamps (audio never leaves your Mac) |
+| **ffmpeg** | Turns `.mov` / `.mp4` / `.m4a` / … into an `.mp3` WhisperKit can read |
+| **whisperkit-cli** | On-device transcription with timestamps |
 
-Then pick how notes get written, and a recap style:
+Then pick a provider and a default style:
 
 ```bash
 ./catchup providers
 ./catchup config anthropic       # paste a Claude / OpenAI / Gemini / … key
-# or, no cloud key:
+# or stay local, no cloud key:
 #   ./catchup config ollama
 #   ollama pull qwen3.6:35b
 ./catchup mode meeting           # work
@@ -63,62 +103,20 @@ Then pick how notes get written, and a recap style:
 ./catchup doctor
 ```
 
----
-
-## Commands
-
-Run `./catchup` or `./catchup help` anytime for the full command list.  
-`./catchup help exam` (or `rec`, `brain`, `clip`, …) prints a short page for that command.
-
-The table below is the everyday set. New commands land in `./catchup help` first.
-
-| Command | What it does |
-|---|---|
-| `./catchup setup` | Install ffmpeg, whisperkit-cli, Python, `.env` |
-| `./catchup doctor` | Check ffmpeg, whisperkit-cli, API key, folders |
-| `./catchup config` | Pick a company and paste its API key |
-| `./catchup config openai` | Same, skipping the menu (any id from `providers`) |
-| `./catchup providers` | List Anthropic, OpenAI, Gemini, Groq, OpenRouter, … |
-| `./catchup model MODEL` | Override the default model for that company |
-| `./catchup mode meeting\|lecture` | Set the default recap style |
-| `./catchup meeting FILE` | Recap a **work** recording |
-| `./catchup lecture FILE` | Recap a **class** recording |
-| `./catchup drop FILE` | Copy a file into `recordings/` |
-| `./catchup watch meeting` | Auto-recap new files as meetings |
-| `./catchup watch lecture` | Auto-recap new files as lectures |
-| `./catchup brain new NAME --lecture\|--meeting` | Create a specialist agent folder |
-| `./catchup into NAME FILE` | Recap a recording **into that brain** |
-| `./catchup ask NAME QUESTION` | RAG over that brain only |
-| `./catchup think NAME TASK` | Deep multi-pass analysis (cortex + critique) |
-| `./catchup exam NAME` | Practice exam from that brain |
-| `./catchup diff NAME` | What changed since the previous recap |
-| `./catchup clip NAME WORDS` | Play the audio of a concept |
-| `./catchup rec` | Record from the mic, then recap |
-| `./catchup cortex NAME` | Show that brain's concept graph |
-| `./catchup mcp install` | Expose brains to Cursor via MCP |
-| `./catchup search WORDS` | Find a topic across meetings + lectures |
-| `./catchup ask QUESTION` | Ask your library |
-| `./catchup quiz` | Flashcards from lecture terms |
-| `./catchup todos` | Action items from all meetings |
-| `./catchup moments` | Timestamps from the latest recap |
-| `./catchup play HH:MM:SS` | Play 25s of that moment |
-| `./catchup sync` | What the Mac and the iPhone each hold |
-| `./catchup sync push` | Send recaps to the iPhone (add `--with-audio` for playback) |
-| `./catchup sync pull` | File iPhone recordings into CLI brains |
-| `./catchup install-watch meeting\|lecture` | Background watcher (launchd) |
+`./catchup doctor` is the send-this-to-a-friend check. If it is green, they are ready.
 
 ---
 
-## Typical workflows
+## Everyday use
 
-**Work — one call, right now**
+**One call, right now**
 
 ```bash
 ./catchup meeting ~/Desktop/standup.mov
 ./catchup open
 ```
 
-**School — one lecture, right now**
+**One lecture, right now**
 
 ```bash
 ./catchup lecture ~/Downloads/cs61a-week3.mp4
@@ -128,47 +126,17 @@ The table below is the everyday set. New commands land in `./catchup help` first
 **Drop-box for the week** (leave it running)
 
 ```bash
-./catchup watch lecture          # midterms week
+./catchup watch lecture
 ./catchup drop ~/Downloads/week4-os.m4a
 ```
 
-```bash
-./catchup watch meeting          # a sprint of standups
-./catchup drop ~/Downloads/zoom-sync.m4a
-```
-
-If the filename already says `lecture`, `class`, `week`, `zoom`, `standup`, `1-1`, … CatchMeUp can guess. Passing `meeting` or `lecture` always wins.
+If the filename already says `lecture`, `class`, `week`, `zoom`, `standup`, `1-1`, CatchMeUp can guess. Passing `meeting` or `lecture` always wins.
 
 ---
 
-## Mac + iPhone (one library)
+## Brains — named agents over what you missed
 
-The CLI is the batch engine. The iOS app is the pocket surface. They share a library through the app's iCloud Drive folder — no extra account, and audio never reaches a third party.
-
-1. On the iPhone: **Settings ▸ Sync** on, signed into the same Apple Account as this Mac.
-2. Recap as usual (`./catchup lecture FILE`, `./catchup into cs61a DIR`). When the iCloud folder already exists, CatchMeUp pushes the notes to the phone by itself.
-3. Record a lecture on the phone, then `./catchup sync pull` so exam / clip / think see it too.
-
-```bash
-./catchup sync                 # what each side is holding
-./catchup sync push            # send recaps (notes + transcripts)
-./catchup sync push --with-audio
-./catchup sync pull            # file iPhone recordings into your brains
-```
-
-Prefer Dropbox or a USB stick instead of iCloud?
-
-```bash
-CATCHMEUP_SYNC_DIR=~/Dropbox/CatchMeUp ./catchup sync push
-```
-
-Turn auto-push off with `CATCHMEUP_SYNC=0`. The Simulator helper `ios/tools/load_cli_data.py` is only for development — a real iPhone uses this path.
-
----
-
-## After the recap (the unique part)
-
-Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is **named specialist agents**, each bound to a folder of recaps that *you actually missed*:
+Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is a **named specialist** bound to a folder of recaps you actually skipped:
 
 | Brain folder | Agent | You ask |
 |---|---|---|
@@ -176,13 +144,13 @@ Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is **named
 | `brains/acme-client/` | Account memory | “What did we promise them about billing?” |
 | `brains/standups/` | Team historian | “Who owns the auth migration?” |
 
-Each brain has a **persona** (how it should think), an **inbox** (drop recordings), and a **recap corpus** the RAG search cannot leave. Ask it from the terminal (`./catchup ask cs61a …`) or from the iOS app.
+Each brain has a persona, an inbox, and a recap corpus the search cannot leave. Ask it from the terminal or from the iOS app.
 
 ```bash
 ./catchup brain new cs61a --lecture
 ./catchup brain persona cs61a You are a CS 61A TA. Prefer SICP vocabulary.
 ./catchup into cs61a ~/Downloads/week3.mp4
-./catchup into mit-60001 MIT-6.0001/    # whole OCW folder; originals stay put
+./catchup into mit-60001 MIT-6.0001/    # whole folder; originals stay put
 ./catchup ask cs61a what is a binary heap?
 ./catchup think cs61a explain mutexes for the midterm
 ./catchup exam cs61a
@@ -190,48 +158,35 @@ Each brain has a **persona** (how it should think), an **inbox** (drop recording
 ./catchup rec lecture          # mic → recap (Ctrl-C to stop)
 ./catchup diff cs61a
 ./catchup cortex cs61a
-./catchup watch cs61a          # anything dropped in brains/cs61a/inbox/
-./catchup sync push            # same library on the iPhone
+./catchup watch cs61a          # brains/cs61a/inbox/
 ```
 
-Otter and Fireflies summarize one call in the cloud. CatchMeUp keeps a **local library** of everything you missed, then you query a *specific* brain from the terminal or from the iPhone.
+**`think`** is four passes, not one chatbot call: decompose → fire related concepts in that brain’s cortex → gather cited claims → critique gaps → synthesize. Inspect the graph with `./catchup cortex cs61a`.
 
-Each recap also writes Markdown and Word into `output/`. Read concepts **in CatchMeUp** — you do not need Obsidian or another notes app:
+Meetings get **speaker labels** (WhisperKit diarization) so action items can say `Speaker 1 / Jordan`. Lectures skip diarization unless you set `CATCHMEUP_DIARIZE=1`.
+
+Each recap also writes Markdown and Word into `output/`. Stay in CatchMeUp — you do not need a second notes app:
 
 ```bash
 ./catchup notes cs61a
-./catchup walk cs61a mutex      # hop around the graph in the terminal
-./catchup graph cs61a           # clickable graph CatchMeUp generates (opens in your browser)
+./catchup walk cs61a mutex
+./catchup graph cs61a          # opens a clickable graph in the browser
 ```
 
-Obsidian is optional: `./catchup obsidian cs61a` dumps a vault folder if you already live there.
-
-**Deep analysis (`./catchup think`)** is four passes, not one chatbot call: decompose the task → fire related concepts in that brain’s cortex (a concept graph that grows as recaps co-occur) → gather cited claims → critique gaps → synthesize. The LLM is the inner voice; the graph is the memory. Inspect it with `./catchup cortex cs61a`.
-
-Meetings get **speaker labels** (WhisperKit diarization) so action items can say `Speaker 1 / Jordan` instead of “someone.” Lectures skip diarization unless you set `CATCHMEUP_DIARIZE=1`.
-
-After a few recaps in a brain:
-
-```bash
-./catchup exam cs61a --print     # practice test from terms + study list
-./catchup diff cs61a             # what appeared / vanished since last time
-./catchup clip cs61a mutex       # jump 25s into the archived audio
-./catchup rec lecture            # record from the mic, Ctrl-C, auto-recap
-./catchup rec --devices
-```
+Obsidian is optional: `./catchup obsidian cs61a` dumps a vault if you already live there.
 
 ---
 
-## What the Word doc looks like
+## What the notes look like
 
-**Meeting recap** (`*_meeting_notes.docx`)
+**Meeting** (`*_meeting_notes.docx`)
 
 - TL;DR
 - Action items & follow-ups (owners / deadlines when they were said)
 - Timestamped bookmarks
 - Detailed notes
 
-**Lecture recap** (`*_lecture_notes.docx`)
+**Lecture** (`*_lecture_notes.docx`)
 
 - What you missed
 - Key moments (definitions, worked examples, “this will be on the exam”)
@@ -241,44 +196,114 @@ After a few recaps in a brain:
 
 ---
 
-## Folders
+## Commands
 
-```
-./catchup         CLI
-catchmeup/        Python package (pipeline, brains, cortex, MCP, …)
-recordings/       drop files here
-output/           finished Word notes
-processed/        originals + mp3 + transcript json, archived per run
-brains/           specialist agents (gitignored except README)
-logs/             pipeline.log
-.env              your API key + default mode (never commit this)
-```
+Run `./catchup` or `./catchup help` for the full list.  
+`./catchup help exam` (or `rec`, `brain`, `clip`, …) prints a short page for that command.
 
-Recaps and recordings live under `CATCHMEUP_HOME` (the repo root unless you set it). Code stays in `catchmeup/`.
+<details>
+<summary><strong>Setup & config</strong></summary>
 
-Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
+| Command | What it does |
+|---|---|
+| `./catchup setup` | Install ffmpeg, whisperkit-cli, Python, `.env` |
+| `./catchup doctor` | Check ffmpeg, whisperkit-cli, API key, folders |
+| `./catchup config` | Pick a company and paste its API key |
+| `./catchup config openai` | Same, skipping the menu |
+| `./catchup providers` | List Anthropic, OpenAI, Gemini, Groq, OpenRouter, … |
+| `./catchup model MODEL` | Override the default model for that company |
+| `./catchup mode meeting\|lecture` | Set the default recap style |
+
+</details>
+
+<details>
+<summary><strong>Recap</strong></summary>
+
+| Command | What it does |
+|---|---|
+| `./catchup meeting FILE` | Recap a **work** recording |
+| `./catchup lecture FILE` | Recap a **class** recording |
+| `./catchup drop FILE` | Copy a file into `recordings/` |
+| `./catchup watch meeting` | Auto-recap new files as meetings |
+| `./catchup watch lecture` | Auto-recap new files as lectures |
+| `./catchup rec` | Record from the mic, then recap |
+| `./catchup install-watch meeting\|lecture` | Background watcher (launchd) |
+
+</details>
+
+<details>
+<summary><strong>Brains, exam, clip</strong></summary>
+
+| Command | What it does |
+|---|---|
+| `./catchup brain new NAME --lecture\|--meeting` | Create a specialist agent folder |
+| `./catchup into NAME FILE` | Recap a recording **into that brain** |
+| `./catchup ask NAME QUESTION` | RAG over that brain only |
+| `./catchup think NAME TASK` | Deep multi-pass analysis |
+| `./catchup exam NAME` | Practice exam from that brain |
+| `./catchup clip NAME WORDS` | Play ~25s of that concept |
+| `./catchup diff NAME` | What changed since the previous recap |
+| `./catchup cortex NAME` | Show that brain's concept graph |
+
+</details>
+
+<details>
+<summary><strong>Library & Mac ↔ iPhone</strong></summary>
+
+| Command | What it does |
+|---|---|
+| `./catchup search WORDS` | Find a topic across meetings + lectures |
+| `./catchup ask QUESTION` | Ask your library |
+| `./catchup quiz` | Flashcards from lecture terms |
+| `./catchup todos` | Action items from all meetings |
+| `./catchup moments` | Timestamps from the latest recap |
+| `./catchup play HH:MM:SS` | Play 25s of that moment |
+| `./catchup sync` | What the Mac and the iPhone each hold |
+| `./catchup sync push` | Send recaps to the iPhone (`--with-audio` for playback) |
+| `./catchup sync pull` | File iPhone recordings into CLI brains |
+
+</details>
 
 ---
 
-## If something fails
+## Mac + iPhone
 
-| Symptom | Fix |
-|---|---|
-| `ffmpeg not found` | `brew install ffmpeg` then `./catchup doctor` |
-| `whisperkit-cli not found` | `brew install whisperkit-cli` then `./catchup doctor` |
-| `ANTHROPIC_API_KEY not set` / no API key | `./catchup config anthropic` (paste a key) or `./catchup config ollama` |
-| Notes feel like a meeting but it was class | `./catchup lecture FILE` (or `./catchup mode lecture`) |
-| Notes feel like a lecture but it was work | `./catchup meeting FILE` |
-| File sits in `recordings/` | Size must be stable (still copying). Then `./catchup status` |
+The CLI is the batch engine. The iOS app is the pocket surface. They share a library through the app’s iCloud Drive folder — no extra account.
 
-Full traceback lives in `logs/pipeline.log`.
+1. On the iPhone: **Settings ▸ Sync** on, signed into the same Apple Account as this Mac.
+2. Recap as usual. When the iCloud folder already exists, CatchMeUp pushes notes to the phone by itself.
+3. Record on the phone, then `./catchup sync pull` so exam / clip / think see it too.
+
+```bash
+./catchup sync
+./catchup sync push
+./catchup sync push --with-audio
+./catchup sync pull
+```
+
+Prefer Dropbox or a USB stick?
+
+```bash
+CATCHMEUP_SYNC_DIR=~/Dropbox/CatchMeUp ./catchup sync push
+```
+
+The Simulator helper `ios/tools/load_cli_data.py` is only for development. A real iPhone uses this path.
+
+Build the app: see [`ios/README.md`](ios/README.md).
+
+```bash
+cd ios
+brew install xcodegen   # once
+xcodegen generate
+open CatchMeUp.xcodeproj
+```
 
 ---
 
 ## Privacy
 
-- Audio stays on your Mac for transcription (**whisperkit-cli**).
-- The **text transcript** is sent to whichever LLM you configured (Anthropic, OpenAI, Gemini, …) to write the notes.
+- **Audio stays on the device** for transcription (WhisperKit on Mac, Apple Speech on iPhone).
+- The **text transcript** is sent to whichever LLM you configured, to write the notes.
 - `.env` is gitignored. Don’t zip it, don’t Slack it, don’t commit it.
 
 ---
@@ -302,10 +327,8 @@ Full traceback lives in `logs/pipeline.log`.
 | `mistral` | Mistral |
 | `together` | Together AI |
 | `xai` | xAI Grok |
-| `ollama` | Ollama on your machine (no cloud key). Default model: `qwen3.6:35b` |
+| `ollama` | Ollama on your machine (no cloud key). Default: `qwen3.6:35b` |
 | `custom` | Any OpenAI-compatible base URL |
-
-`custom` example:
 
 ```bash
 ./catchup config custom https://your-gateway.example/v1
@@ -313,12 +336,66 @@ Full traceback lives in `logs/pipeline.log`.
 
 ---
 
+## Folders
+
+```
+./catchup         CLI
+catchmeup/        Python package
+recordings/       drop files here
+output/           finished Word notes
+processed/        originals + mp3 + transcript, archived per run
+brains/           specialist agents (gitignored except README)
+ios/              SwiftUI app
+docs/             logo + README art
+logs/             pipeline.log
+.env              your API key + default mode — never commit this
+```
+
+Recaps live under `CATCHMEUP_HOME` (the repo root unless you set it).
+
+Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
+
+---
+
+## If something fails
+
+| Symptom | Fix |
+|---|---|
+| `ffmpeg not found` | `brew install ffmpeg` then `./catchup doctor` |
+| `whisperkit-cli not found` | `brew install whisperkit-cli` then `./catchup doctor` |
+| `ANTHROPIC_API_KEY not set` / no API key | `./catchup config anthropic` or `./catchup config ollama` |
+| Notes feel like a meeting but it was class | `./catchup lecture FILE` (or `./catchup mode lecture`) |
+| Notes feel like a lecture but it was work | `./catchup meeting FILE` |
+| File sits in `recordings/` | Size must be stable (still copying). Then `./catchup status` |
+
+Full traceback lives in `logs/pipeline.log`.
+
+---
+
 ## Tests
 
-Recaps, brains, and cortex data honor `CATCHMEUP_HOME`, so the suite uses a temp directory and never writes into your real `brains/` or `processed/`.
+Recaps, brains, and cortex honor `CATCHMEUP_HOME`, so the suite uses a temp directory and never writes into your real library.
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-That covers folder brains, isolation, cortex ingest/activate/think (LLM mocked), markdown + library search, the clickable graph, MCP tools, and the CLI (`brain new/list/show`, `cortex`, `help`). It does **not** call ffmpeg, whisperkit-cli, or a live LLM — those need a real recording and `./catchup doctor` to go green.
+That covers brains, cortex, chunking, search, the graph, and the CLI. It does **not** call ffmpeg, whisperkit-cli, or a live LLM.
+
+iOS unit tests:
+
+```bash
+cd ios && xcodegen generate
+xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
+---
+
+<p align="center">
+  <img src="docs/logo.png" width="56" alt="CatchMeUp">
+</p>
+
+<p align="center">
+  <sub>MIT License · Audio on-device · Your key, your model</sub>
+</p>

@@ -337,6 +337,7 @@ def guess_mode(path: Path) -> str:
 
 
 def call_llm(transcript_text: str, mode: str, speaker_hint: str = "") -> dict:
+    from . import chunking
     from .providers import complete_json
 
     if mode == "lecture":
@@ -356,8 +357,24 @@ def call_llm(transcript_text: str, mode: str, speaker_hint: str = "") -> dict:
         if speaker_hint:
             role += speaker_hint
 
-    prompt = f"{role}\n\n{schema}\n\nTranscript (timestamped):\n{transcript_text}"
-    return complete_json(prompt, log=log)
+    chunks = chunking.transcript_chunks(transcript_text)
+    if not chunks:
+        raise RuntimeError("empty transcript — nothing to recap")
+
+    parts: list[dict] = []
+    total = len(chunks)
+    for index, chunk in enumerate(chunks, 1):
+        window = ""
+        if total > 1:
+            window = (
+                f" This is part {index} of {total} of the transcript. "
+                "Cover only this window; later parts will be merged.\n"
+            )
+            log(f"Recap pass {index}/{total} ({len(chunk)} chars)")
+            print(f"Recap pass {index}/{total}", flush=True)
+        prompt = f"{role}{window}\n\n{schema}\n\nTranscript (timestamped):\n{chunk}"
+        parts.append(complete_json(prompt, log=log))
+    return chunking.merge_analyses(parts)
 
 
 def _bullets(doc, items):

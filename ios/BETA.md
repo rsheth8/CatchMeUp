@@ -77,7 +77,10 @@ twenty minutes in TestFlight.
   records something and gets a recap about a billing migration hasn't found a
   bug — they're in Demo mode. Switch to Apple's on-device model or an API key.
 - **Transcription is Apple Speech, on device.** Accented speech, crosstalk and
-  bad room audio degrade it, and everything downstream inherits that.
+  bad room audio degrade it, and everything downstream inherits that. iOS 26
+  uses `SpeechAnalyzer`, which is built for long files; older versions fall back
+  to `SFSpeechRecognizer`. Neither runs in the Simulator — that is Apple's
+  limitation, not a build problem, so test transcription on a real device.
 - **Offline grading is keyword matching.** A right answer in unusual words can
   be marked "not quite". Model grading (Settings ▸ Study) fixes most of it and
   needs an API key.

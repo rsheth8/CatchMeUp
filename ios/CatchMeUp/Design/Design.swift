@@ -1,7 +1,29 @@
 import SwiftUI
+import UIKit
 
 // Shared building blocks. Everything visual in the app is assembled from
 // these so spacing, radii and depth stay consistent screen to screen.
+
+// MARK: - Sharing a file that didn't exist yet
+
+/// A file built on demand — an exported recording or a zipped archive.
+struct ExportedFile: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+/// `ShareLink` wants its item up front, and exports only exist once they've
+/// been assembled, so those go through the activity controller instead. "Save
+/// to Files" is one of the options it offers.
+struct ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
 
 // MARK: - Card
 

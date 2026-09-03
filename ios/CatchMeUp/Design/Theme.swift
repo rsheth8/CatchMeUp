@@ -131,3 +131,11 @@ func durationText(_ seconds: Double) -> String {
     if s >= 3600 { return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) }
     return String(format: "%d:%02d", s / 60, s % 60)
 }
+
+/// "1.8 GB". `.file` style counts in decimal units, which is what iOS Settings
+/// shows — matching it avoids the app and the system disagreeing about a number
+/// the user can see in both places.
+func byteText(_ bytes: Int64) -> String {
+    guard bytes > 0 else { return "Zero KB" }
+    return bytes.formatted(.byteCount(style: .file))
+}

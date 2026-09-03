@@ -45,6 +45,59 @@ class BrainTests(IsolatedHome):
             brains.retrieve("billing addendum", list(brains.iter_brain_records("cs61a")))
         )
 
+    def test_retrieve_includes_lecture_notes_file(self):
+        rec = self.seed_lecture("cs61a")
+        folder = Path(rec["_dir"])
+        (folder / "week3_lecture_notes.md").write_text(
+            "Heapify appears only in the lecture notes markdown, not the JSON fields."
+        )
+        hits = brains.retrieve("heapify", list(brains.iter_brain_records("cs61a")))
+        self.assertTrue(any("heapify" in h["text"].lower() for h in hits), hits)
+
+    def test_ask_brain_closed_skips_llm_when_unrelated(self):
+        self.seed_lecture("cs61a")
+        with patch("catchmeup.providers.complete_text") as mocked:
+            out = brains.ask_brain(
+                "cs61a", "what is photosynthesis?", log=lambda *_: None, closed=True,
+            )
+        mocked.assert_not_called()
+        self.assertIn("general knowledge", out.lower())
+
+    def test_ask_brain_tutor_helps_when_notes_miss(self):
+        self.seed_lecture("cs61a")
+        with patch(
+            "catchmeup.providers.complete_text",
+            return_value="From your notes: not covered.\n\nBeyond the recordings: photosynthesis…",
+        ) as mocked:
+            out = brains.ask_brain("cs61a", "what is photosynthesis?", log=lambda *_: None)
+        mocked.assert_called()
+        self.assertEqual(mocked.call_args.kwargs.get("system"), brains.NOTES_FIRST_SYSTEM)
+        self.assertIn("beyond", out.lower())
+        prompt = mocked.call_args[0][0]
+        self.assertIn(brains.EMPTY_SOURCES, prompt)
+
+    def test_ask_brain_notes_first_on_hits(self):
+        self.seed_lecture("cs61a")
+        with patch(
+            "catchmeup.providers.complete_text",
+            return_value="From your notes: a mutex is a lock [1].",
+        ) as mocked:
+            out = brains.ask_brain("cs61a", "what is a mutex?", log=lambda *_: None)
+        self.assertIn("mutex", out.lower())
+        prompt = mocked.call_args[0][0]
+        self.assertIn("Sources:", prompt)
+        self.assertIn("[1]", prompt)
+        self.assertEqual(mocked.call_args.kwargs.get("system"), brains.NOTES_FIRST_SYSTEM)
+
+    def test_ask_brain_closed_sends_closed_book_sources(self):
+        self.seed_lecture("cs61a")
+        with patch(
+            "catchmeup.providers.complete_text",
+            return_value="A mutex is a lock [1].",
+        ) as mocked:
+            brains.ask_brain("cs61a", "what is a mutex?", log=lambda *_: None, closed=True)
+        self.assertEqual(mocked.call_args.kwargs.get("system"), brains.CLOSED_BOOK_SYSTEM)
+
     def test_persona_roundtrip(self):
         brains.create_brain("os", kind="lecture")
         meta = brains.load_brain("os")
@@ -55,6 +108,25 @@ class BrainTests(IsolatedHome):
     def test_missing_brain(self):
         with self.assertRaises(FileNotFoundError):
             brains.load_brain("nope")
+
+    def test_want_closed_flag_and_env(self):
+        import os
+
+        previous = os.environ.get("CATCHMEUP_CLOSED")
+        os.environ.pop("CATCHMEUP_CLOSED", None)
+        self.addCleanup(lambda: (
+            os.environ.__setitem__("CATCHMEUP_CLOSED", previous)
+            if previous is not None
+            else os.environ.pop("CATCHMEUP_CLOSED", None)
+        ))
+        self.assertFalse(brains.want_closed())
+        self.assertFalse(brains.want_closed(False))
+        self.assertTrue(brains.want_closed(True))
+        os.environ["CATCHMEUP_CLOSED"] = "1"
+        self.assertTrue(brains.want_closed())
+        self.assertFalse(brains.want_closed(False))
+        self.assertEqual(brains.grounding_system(True), brains.CLOSED_BOOK_SYSTEM)
+        self.assertEqual(brains.grounding_system(False), brains.NOTES_FIRST_SYSTEM)
 
 
 class CortexTests(IsolatedHome):
@@ -92,7 +164,7 @@ class CortexTests(IsolatedHome):
         self.seed_lecture("cs61a")
         calls = {"json": 0, "text": 0}
 
-        def fake_json(prompt, log=print):
+        def fake_json(prompt, log=print, **_kwargs):
             calls["json"] += 1
             if "subquestions" in prompt or "Decompose" in prompt:
                 return {
@@ -118,7 +190,7 @@ class CortexTests(IsolatedHome):
                 "exam_or_action": ["Draw an environment diagram."],
             }
 
-        def fake_text(prompt, log=print):
+        def fake_text(prompt, log=print, **_kwargs):
             calls["text"] += 1
             return (
                 "1. Direct answer: a mutex is a lock.\n"
@@ -137,6 +209,41 @@ class CortexTests(IsolatedHome):
         brains.create_brain("empty")
         msg = cortex.think("empty", "anything", log=lambda *_: None)
         self.assertIn("no recaps", msg.lower())
+
+    def test_think_closed_skips_llm_when_unrelated(self):
+        self.seed_lecture("cs61a")
+        with patch("catchmeup.cortex.complete_json") as mocked_json, patch(
+            "catchmeup.cortex.complete_text"
+        ) as mocked_text:
+            out = cortex.think(
+                "cs61a", "what is photosynthesis?", log=lambda *_: None, closed=True,
+            )
+        mocked_json.assert_not_called()
+        mocked_text.assert_not_called()
+        self.assertIn("general knowledge", out.lower())
+
+    def test_think_tutor_still_calls_llm_when_notes_miss(self):
+        self.seed_lecture("cs61a")
+
+        def fake_json(prompt, log=print, **_kwargs):
+            if "subquestions" in prompt or "Decompose" in prompt:
+                return {
+                    "task_type": "explain",
+                    "subquestions": ["What is photosynthesis?"],
+                    "concepts": ["photosynthesis"],
+                }
+            if "claims" in prompt:
+                return {"claims": [], "missing": ["photosynthesis was not in lecture"]}
+            return {"tensions": [], "gaps": ["not in recordings"], "exam_or_action": []}
+
+        with patch("catchmeup.cortex.complete_json", side_effect=fake_json), patch(
+            "catchmeup.cortex.complete_text",
+            return_value="Beyond the recordings: plants make sugar from light.",
+        ) as mocked_text:
+            out = cortex.think("cs61a", "what is photosynthesis?", log=lambda *_: None)
+        mocked_text.assert_called()
+        self.assertEqual(mocked_text.call_args.kwargs.get("system"), brains.NOTES_FIRST_SYSTEM)
+        self.assertIn("beyond", out.lower())
 
     def test_concept_notes_walk_trace_and_typed_synapses(self):
         self.seed_lecture("cs61a")
@@ -249,6 +356,13 @@ class LibraryTests(IsolatedHome):
     def test_library_empty(self):
         self.assertEqual(library.list_records(), [])
 
+    def test_library_ask_closed_skips_llm_when_unrelated(self):
+        self.seed_lecture("cs61a")
+        with patch("catchmeup.providers.complete_text") as mocked:
+            with self.assertRaises(SystemExit):
+                library.cmd_ask("what is photosynthesis?", mode=None, closed=True)
+        mocked.assert_not_called()
+
 
 class PipelineTests(IsolatedHome):
     def test_guess_mode(self):
@@ -289,6 +403,7 @@ class PipelineTests(IsolatedHome):
         notes = list(brains.notes_dir("cs61a").glob("*_lecture_notes.md"))
         self.assertTrue(notes)
         self.assertIn("[[mutex]]", notes[0].read_text())
+        self.assertTrue((folder / notes[0].name).is_file())
 
     def test_pending_media_and_keep_library_source(self):
         brains.create_brain("mit-60001", kind="lecture")
@@ -323,6 +438,12 @@ class PipelineTests(IsolatedHome):
         )
         pending = [p.name for p in brains.pending_media("mit-60001", corpus)]
         self.assertEqual(pending, ["02 - clip.mp4"])
+        leftover_video = corpus / "03 - talk.mp4"
+        leftover_mp3 = corpus / "03 - talk.mp3"
+        leftover_video.write_bytes(b"c")
+        leftover_mp3.write_bytes(b"m")
+        pending = [p.name for p in brains.pending_media("mit-60001", corpus)]
+        self.assertEqual(pending, ["02 - clip.mp4", "03 - talk.mp4"])
 
     def test_media_files_walks_nested_week_folders(self):
         brains.create_brain("os", kind="lecture")
@@ -476,7 +597,7 @@ class McpTests(IsolatedHome):
     def test_think_brain_mocked(self):
         self.seed_lecture("cs61a")
 
-        def fake_json(prompt, log=print):
+        def fake_json(prompt, log=print, **_kwargs):
             if "Decompose" in prompt or "subquestions" in prompt:
                 return {"task_type": "explain", "subquestions": ["mutex?"], "concepts": ["mutex"]}
             if "claims" in prompt:

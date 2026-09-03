@@ -215,15 +215,18 @@ def parse_json_payload(raw: str) -> dict:
         raise
 
 
-def _complete_anthropic(prompt: str, model: str, api_key: str) -> str:
+def _complete_anthropic(prompt: str, model: str, api_key: str, system: str | None = None) -> str:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
-    resp = client.messages.create(
-        model=model,
-        max_tokens=8000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    kwargs = {
+        "model": model,
+        "max_tokens": 8000,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if system:
+        kwargs["system"] = system
+    resp = client.messages.create(**kwargs)
     return resp.content[0].text
 
 
@@ -235,6 +238,7 @@ def _complete_openai(
     headers: dict | None,
     json_mode: bool = False,
     extra_body: dict | None = None,
+    system: str | None = None,
 ) -> str:
     from openai import OpenAI
 
@@ -244,9 +248,13 @@ def _complete_openai(
     if headers:
         kwargs["default_headers"] = headers
     client = OpenAI(**kwargs)
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
     create_kwargs = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": 8000,
     }
     if extra_body:
@@ -264,7 +272,7 @@ def _complete_openai(
     return resp.choices[0].message.content or ""
 
 
-def _complete_raw(prompt: str, json_mode: bool, log, retries: int) -> str:
+def _complete_raw(prompt: str, json_mode: bool, log, retries: int, system: str | None = None) -> str:
     provider = active_provider()
     if provider not in PROVIDERS:
         raise RuntimeError(f"Unknown CATCHMEUP_PROVIDER={provider!r}. Run ./catchup providers")
@@ -286,7 +294,7 @@ def _complete_raw(prompt: str, json_mode: bool, log, retries: int) -> str:
     for attempt in range(1, retries + 1):
         try:
             if spec["kind"] == "anthropic":
-                return _complete_anthropic(prompt, model, api_key)
+                return _complete_anthropic(prompt, model, api_key, system=system)
             return _complete_openai(
                 prompt,
                 model,
@@ -295,6 +303,7 @@ def _complete_raw(prompt: str, json_mode: bool, log, retries: int) -> str:
                 spec.get("headers"),
                 json_mode=json_mode,
                 extra_body=openai_extra_body(provider),
+                system=system,
             )
         except Exception as e:
             last_err = e
@@ -312,18 +321,18 @@ def _complete_raw(prompt: str, json_mode: bool, log, retries: int) -> str:
     raise RuntimeError(f"LLM call failed after {retries} attempts: {last_err}")
 
 
-def complete_text(prompt: str, log=print, retries: int = 5) -> str:
+def complete_text(prompt: str, log=print, retries: int = 5, system: str | None = None) -> str:
     """Free-form answer (ask, quiz generation)."""
-    return _complete_raw(prompt, json_mode=False, log=log, retries=retries).strip()
+    return _complete_raw(prompt, json_mode=False, log=log, retries=retries, system=system).strip()
 
 
-def complete_json(prompt: str, log=print, retries: int = 5) -> dict:
+def complete_json(prompt: str, log=print, retries: int = 5, system: str | None = None) -> dict:
     """Send prompt to the configured provider and parse a JSON object."""
     delay = 5
     last_err = None
     for attempt in range(1, retries + 1):
         try:
-            raw = _complete_raw(prompt, json_mode=True, log=log, retries=1)
+            raw = _complete_raw(prompt, json_mode=True, log=log, retries=1, system=system)
             return parse_json_payload(raw)
         except json.JSONDecodeError as e:
             last_err = e

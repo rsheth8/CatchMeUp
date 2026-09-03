@@ -101,13 +101,22 @@ class IsolatedHome(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
+        self._prev_env = {
+            key: os.environ.get(key) for key in ("CATCHMEUP_HOME", "CATCHMEUP_CLOSED", "CATCHMEUP_MODE")
+        }
         os.environ["CATCHMEUP_HOME"] = str(self.home)
+        os.environ.pop("CATCHMEUP_CLOSED", None)
+        os.environ.pop("CATCHMEUP_MODE", None)
         for name in ("recordings", "output", "processed", "logs", "brains"):
             (self.home / name).mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         self._tmp.cleanup()
-        os.environ.pop("CATCHMEUP_HOME", None)
+        for key, previous in self._prev_env.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
 
     def seed_lecture(self, slug: str = "cs61a"):
         from catchmeup import brains

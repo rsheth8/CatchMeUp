@@ -16,6 +16,14 @@ struct RecapDetailView: View {
     @State private var reminderNotice: ReminderNotice?
     @State private var showMissingAudio = false
 
+    /// Where the audio is, refreshed whenever the view or iCloud says so.
+    @State private var audioState: AudioAvailability = .none
+    @State private var isFetchingAudio = false
+    @State private var audioError: String?
+    @State private var confirmRemoveAudio = false
+    @State private var exported: ExportedFile?
+    @State private var isExporting = false
+
     private var recording: Recording? { store.recording(recordingID) }
 
     var body: some View {
@@ -31,7 +39,8 @@ struct RecapDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .task(id: recordingID) { await maybeProcess() }
-        .onAppear { loadAudio() }
+        .onAppear { refreshAudioState() }
+        .onChange(of: store.audio.cloudItems) { _, _ in refreshAudioState() }
         .onDisappear { player.stop() }
         .userActivity(CatchMeUpLink.recapActivityType, isActive: recording != nil) { activity in
             guard let rec = recording else { return }
@@ -49,19 +58,53 @@ struct RecapDetailView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-        .alert("Audio isn't on this device", isPresented: $showMissingAudio) {
+        .alert("No audio for this recap", isPresented: $showMissingAudio) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("This recap's notes and transcript are available, but its original recording wasn't imported. Add the audio to play key moments.")
+            Text(audioState == .none
+                 ? "The notes, transcript and key moments are all still here — the audio was removed to save space."
+                 : "This recap's notes and transcript are available, but its original recording wasn't imported. Add the audio to play key moments.")
+        }
+        .alert("Couldn't get the audio", isPresented: Binding(
+            get: { audioError != nil },
+            set: { if !$0 { audioError = nil } }
+        )) {
+            Button("OK", role: .cancel) { audioError = nil }
+        } message: {
+            Text(audioError ?? "")
+        }
+        .confirmationDialog("Remove the audio?", isPresented: $confirmRemoveAudio,
+                            titleVisibility: .visible) {
+            Button("Remove audio, keep notes", role: .destructive) {
+                store.removeAudio(recordingID)
+                player.stop()
+                refreshAudioState()
+                Haptics.success()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text(removeAudioWarning)
+        }
+        .sheet(item: $exported) { file in
+            ShareSheet(url: file.url)
         }
         .sheet(isPresented: $showTranscript) {
             if let rec = recording {
                 TranscriptView(recording: rec) { seconds in
                     showTranscript = false
-                    player.play(from: seconds)
+                    play(from: seconds)
                 }
             }
         }
+    }
+
+    /// Local-only audio has no second copy anywhere, so say so plainly.
+    private var removeAudioWarning: String {
+        let size = recording.map { byteText(store.audio.bytes(for: $0)) } ?? ""
+        if audioState == .onDevice {
+            return "This is the only copy — it can't be recovered. Your notes, transcript and key moments stay, but you won't be able to play them back. Frees \(size)."
+        }
+        return "The audio will be deleted from iCloud and every device. Your notes, transcript and key moments stay. Frees \(size)."
     }
 
     // MARK: - Content
@@ -90,7 +133,7 @@ struct RecapDetailView: View {
             .animation(.gentle, value: rec.recap)
         }
         .safeAreaInset(edge: .bottom) {
-            if player.isLoaded { playerBar }
+            if player.isLoaded || isFetchingAudio || audioState.needsDownload { playerBar }
         }
     }
 
@@ -174,7 +217,7 @@ struct RecapDetailView: View {
                                     Image(systemName: done ? "checkmark.circle.fill" : "circle")
                                         .font(.body)
                                         .foregroundStyle(done ? Color.brand : Color.secondary.opacity(0.5))
-                                    Text(item)
+                                    Text(md: item)
                                         .font(.subheadline)
                                         .strikethrough(done, color: .secondary)
                                         .foregroundStyle(done ? .secondary : .primary)
@@ -230,7 +273,8 @@ struct RecapDetailView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text([s.label, s.name].filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.subheadline.weight(.semibold))
-                                Text(s.said).font(.caption).foregroundStyle(.secondary)
+                                Text(md: s.said).font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -245,7 +289,7 @@ struct RecapDetailView: View {
     private func lectureBody(_ r: Recap) -> some View {
         bulletSection("What you missed", "sparkles", r.tldr, tint: .amber)
         bookmarksSection(r.bookmarks, title: "Key moments")
-        notesSection(r.detailedNotes, title: "Notes by topic")
+        notesSection(r.detailedNotes, title: "Notes by topic", tint: .amber)
 
         if let terms = r.terms, !terms.isEmpty {
             section("Terms", "character.book.closed", trailing: "\(terms.count)") {
@@ -253,7 +297,8 @@ struct RecapDetailView: View {
                     ForEach(Array(terms.enumerated()), id: \.element.id) { idx, t in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(t.term).font(.subheadline.weight(.semibold)).foregroundStyle(Color.amber)
-                            Text(t.definition).font(.subheadline).foregroundStyle(.secondary)
+                            Text(md: t.definition).font(.subheadline).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.vertical, 8)
                         if idx < terms.count - 1 { Divider().opacity(0.4) }
@@ -268,7 +313,8 @@ struct RecapDetailView: View {
                     ForEach(study, id: \.self) { s in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "circle").font(.footnote).foregroundStyle(.tertiary)
-                            Text(s).font(.subheadline)
+                            Text(md: s).font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -288,8 +334,11 @@ struct RecapDetailView: View {
                         ForEach(items, id: \.self) { b in
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Circle().fill(tint).frame(width: 5, height: 5)
-                                Text(b)
+                                    .alignmentGuide(.firstTextBaseline) { _ in 5 }
+                                Text(md: b)
                                     .font(.subheadline)
+                                    .lineSpacing(3)
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
@@ -306,9 +355,11 @@ struct RecapDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(marks.enumerated()), id: \.element.id) { idx, m in
                         Button {
-                            if player.isLoaded, let s = m.seconds {
+                            // Cloud-backed audio downloads on the way in, so a
+                            // key moment is tappable whether or not it's here.
+                            if let s = m.seconds, audioState != .none, audioState != .missing {
                                 Haptics.tap()
-                                player.play(from: s)
+                                play(from: s)
                             } else {
                                 Haptics.warning()
                                 showMissingAudio = true
@@ -321,11 +372,12 @@ struct RecapDetailView: View {
                                     .padding(.horizontal, 7).padding(.vertical, 4)
                                     .background(Color.brandSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(m.heading).font(.subheadline.weight(.semibold))
-                                    Text(m.insight).font(.caption).foregroundStyle(.secondary)
+                                    Text(md: m.heading).font(.subheadline.weight(.semibold))
+                                    Text(md: m.insight).font(.caption).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: player.isLoaded ? "play.circle.fill" : "waveform.slash")
+                                Image(systemName: bookmarkSymbol)
                                     .font(.title3)
                                     .foregroundStyle(.tertiary)
                             }
@@ -341,17 +393,15 @@ struct RecapDetailView: View {
     }
 
     @ViewBuilder
-    private func notesSection(_ notes: [DetailNote]?, title: String = "Detailed notes") -> some View {
+    private func notesSection(_ notes: [DetailNote]?, title: String = "Detailed notes",
+                              tint: Color = .brand) -> some View {
         if let notes, !notes.isEmpty {
             section(title, "doc.text") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(notes.enumerated()), id: \.element.id) { idx, n in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(n.heading).font(.subheadline.weight(.semibold))
-                            Text(n.content)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(md: n.heading).font(.subheadline.weight(.semibold))
+                            MarkdownText(n.content, style: noteStyle(tint))
                         }
                         .padding(.vertical, 9)
                         if idx < notes.count - 1 { Divider().opacity(0.4) }
@@ -359,6 +409,12 @@ struct RecapDetailView: View {
                 }
             }
         }
+    }
+
+    private func noteStyle(_ tint: Color) -> MarkdownStyle {
+        var style = MarkdownStyle.note
+        style.tint = tint
+        return style
     }
 
     private func section<C: View>(_ title: String, _ symbol: String, trailing: String? = nil,
@@ -402,48 +458,95 @@ struct RecapDetailView: View {
 
     // MARK: - Player
 
+    private var bookmarkSymbol: String {
+        if player.isLoaded { return "play.circle.fill" }
+        switch audioState {
+        case .onDevice, .downloaded: return "play.circle.fill"
+        case .inCloud: return "icloud.and.arrow.down"
+        case .downloading: return "arrow.down.circle"
+        default: return "waveform.slash"
+        }
+    }
+
+    @ViewBuilder
     private var playerBar: some View {
         FloatingControlShelf(contentPadding: 10) {
-            HStack(spacing: 14) {
-                Button { player.skip(-15) } label: {
-                    Image(systemName: "gobackward.15").font(.title3)
-                }
-                .buttonStyle(.plain)
+            if player.isLoaded { transport } else { fetchRow }
+        }
+    }
 
-                Button {
-                    Haptics.tap()
-                    player.toggle()
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 38))
-                        .foregroundStyle(recording?.mode.accent ?? .brand)
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .buttonStyle(.plain)
+    /// Stands in for the transport while the file is still in iCloud, so the
+    /// download is something the user can see rather than a stalled tap.
+    private var fetchRow: some View {
+        let tint = recording?.mode.accent ?? .brand
+        let busy = isFetchingAudio || audioState.isDownloading
+        return HStack(spacing: 13) {
+            Button { play(from: nil) } label: {
+                Image(systemName: busy ? "icloud.and.arrow.down" : "play.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(tint)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+            .disabled(busy)
 
-                Button { player.skip(15) } label: {
-                    Image(systemName: "goforward.15").font(.title3)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(busy ? "Downloading from iCloud…" : "Play from iCloud")
+                    .font(.subheadline.weight(.semibold))
+                if case .downloading(let fraction) = audioState, fraction > 0 {
+                    ProgressView(value: fraction).tint(tint)
+                } else if busy {
+                    ProgressView().progressViewStyle(.linear).tint(tint)
+                } else if let rec = recording {
+                    Text("\(byteText(store.audio.bytes(for: rec))) · plays as soon as it lands")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
 
-                VStack(spacing: 3) {
-                    Slider(value: Binding(
-                        get: { scrubbing ? scrubValue : player.currentTime },
-                        set: { scrubValue = $0 }
-                    ), in: 0...max(player.duration, 0.1)) { editing in
-                        scrubbing = editing
-                        if !editing { player.seek(to: scrubValue) }
-                    }
-                    .tint(recording?.mode.accent ?? .brand)
+    private var transport: some View {
+        HStack(spacing: 14) {
+            Button { player.skip(-15) } label: {
+                Image(systemName: "gobackward.15").font(.title3)
+            }
+            .buttonStyle(.plain)
 
-                    HStack {
-                        Text(durationText(scrubbing ? scrubValue : player.currentTime))
-                        Spacer()
-                        Text("−" + durationText(max(0, player.duration - (scrubbing ? scrubValue : player.currentTime))))
-                    }
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            Button {
+                Haptics.tap()
+                togglePlayback()
+            } label: {
+                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 38))
+                    .foregroundStyle(recording?.mode.accent ?? .brand)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+
+            Button { player.skip(15) } label: {
+                Image(systemName: "goforward.15").font(.title3)
+            }
+            .buttonStyle(.plain)
+
+            VStack(spacing: 3) {
+                Slider(value: Binding(
+                    get: { scrubbing ? scrubValue : player.currentTime },
+                    set: { scrubValue = $0 }
+                ), in: 0...max(player.duration, 0.1)) { editing in
+                    scrubbing = editing
+                    if !editing { player.seek(to: scrubValue) }
                 }
+                .tint(recording?.mode.accent ?? .brand)
+
+                HStack {
+                    Text(durationText(scrubbing ? scrubValue : player.currentTime))
+                    Spacer()
+                    Text("−" + durationText(max(0, player.duration - (scrubbing ? scrubValue : player.currentTime))))
+                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
         }
     }
@@ -465,19 +568,23 @@ struct RecapDetailView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if let rec = recording, let recap = rec.recap {
-                ShareLink(item: RecapMarkdown.build(rec, recap)) {
-                    Image(systemName: "square.and.arrow.up")
+            if let rec = recording {
+                if let recap = rec.recap {
+                    ShareLink(item: RecapMarkdown.build(rec, recap)) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
                 }
                 Menu {
-                    Button {
-                        UIPasteboard.general.string = RecapMarkdown.build(rec, recap)
-                        Haptics.success()
-                    } label: { Label("Copy as Markdown", systemImage: "doc.on.doc") }
+                    if let recap = rec.recap {
+                        Button {
+                            UIPasteboard.general.string = RecapMarkdown.build(rec, recap)
+                            Haptics.success()
+                        } label: { Label("Copy as Markdown", systemImage: "doc.on.doc") }
 
-                    Button {
-                        Task { await pipeline.rewrite(recordingID: recordingID, store: store, settings: settings) }
-                    } label: { Label("Rewrite notes", systemImage: "arrow.clockwise") }
+                        Button {
+                            Task { await pipeline.rewrite(recordingID: recordingID, store: store, settings: settings) }
+                        } label: { Label("Rewrite notes", systemImage: "arrow.clockwise") }
+                    }
 
                     Menu("Add to brain") {
                         Button("None") { store.assign(recordingID, toBrain: nil) }
@@ -485,6 +592,8 @@ struct RecapDetailView: View {
                             Button(b.name) { store.assign(recordingID, toBrain: b.id) }
                         }
                     }
+
+                    if rec.hasAudio { audioMenu(rec) }
 
                     Divider()
 
@@ -494,14 +603,109 @@ struct RecapDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .disabled(isExporting)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func audioMenu(_ rec: Recording) -> some View {
+        Divider()
+
+        Button { exportAudio() } label: {
+            Label("Export recording to Files…", systemImage: "square.and.arrow.down")
+        }
+
+        // Pinning only means something when there's a cloud copy that could
+        // otherwise be evicted.
+        if store.syncEnabled {
+            Button {
+                store.setKeepDownloaded(rec.id, !rec.keepAudioDownloaded)
+                Haptics.tap()
+            } label: {
+                Label(rec.keepAudioDownloaded ? "Stop keeping downloaded" : "Keep downloaded",
+                      systemImage: rec.keepAudioDownloaded ? "pin.slash" : "pin")
+            }
+        }
+
+        if audioState.canFreeLocalCopy {
+            Button {
+                try? store.freeLocalCopy(rec.id)
+                player.stop()
+                refreshAudioState()
+                Haptics.success()
+            } label: {
+                Label("Remove download · \(byteText(store.audio.bytes(for: rec)))",
+                      systemImage: "icloud.slash")
+            }
+        }
+
+        Button(role: .destructive) { confirmRemoveAudio = true } label: {
+            Label("Remove audio, keep notes", systemImage: "waveform.slash")
         }
     }
 
     // MARK: - Actions
 
-    private func loadAudio() {
-        if let rec = recording, let url = store.audioURL(for: rec) { player.load(url) }
+    private func refreshAudioState() {
+        guard let rec = recording else { audioState = .none; return }
+        audioState = store.audio.availability(for: rec)
+        if audioState.isPlayable, !player.isLoaded, let url = store.audio.playableURL(for: rec) {
+            player.load(url)
+        }
+    }
+
+    /// Makes sure there's something to play, downloading from iCloud if that's
+    /// what it takes. Returns false when it couldn't, having already said why.
+    private func prepareAudio() async -> Bool {
+        if player.isLoaded { return true }
+        guard let rec = recording, rec.hasAudio else {
+            Haptics.warning()
+            showMissingAudio = true
+            return false
+        }
+        isFetchingAudio = true
+        defer { isFetchingAudio = false }
+        do {
+            player.load(try await store.audio.ensureLocal(for: rec))
+            refreshAudioState()
+            return player.isLoaded
+        } catch is CancellationError {
+            return false
+        } catch {
+            Haptics.warning()
+            audioError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Every route into playback — the big button, a key moment, a transcript
+    /// line — comes through here, so the download only has to be handled once.
+    private func play(from seconds: Double?) {
+        Task {
+            guard await prepareAudio() else { return }
+            store.markPlayed(recordingID)
+            if let seconds { player.play(from: seconds) } else { player.play() }
+        }
+    }
+
+    private func togglePlayback() {
+        if player.isPlaying { player.pause() } else { play(from: nil) }
+    }
+
+    private func exportAudio() {
+        guard let rec = recording else { return }
+        isExporting = true
+        Task {
+            defer { isExporting = false }
+            do {
+                exported = ExportedFile(url: try await AudioExport.stage(rec, store: store))
+                Haptics.success()
+            } catch {
+                Haptics.warning()
+                audioError = error.localizedDescription
+            }
+        }
     }
 
     private func maybeProcess() async {
@@ -513,7 +717,7 @@ struct RecapDetailView: View {
 
     private func runPipeline() async {
         await pipeline.process(recordingID: recordingID, store: store, settings: settings)
-        loadAudio()
+        refreshAudioState()
         if recording?.recap != nil { Haptics.success() }
     }
 

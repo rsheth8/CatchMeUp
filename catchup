@@ -92,8 +92,8 @@ ${BOLD}Brains${RESET}  ${DIM}one specialist per subject or team${RESET}
   brain list | show NAME | persona NAME
   into NAME FILE|DIR    Recap a recording (or a whole folder) into that brain
   rec NAME              Record into that brain's inbox, then recap
-  ask NAME QUESTION     RAG over that brain only
-  think NAME TASK       Deep multi-pass analysis
+  ask NAME QUESTION     Notes-first Q&A (add --closed for exam mode)
+  think NAME TASK       Deep analysis; --closed stays inside the recaps
   walk NAME [CONCEPT]   Open a concept in this app (hop / clip / graph)
   notes NAME            List every concept note in a brain
   graph NAME [CONCEPT]  Open CatchMeUp's own clickable graph
@@ -244,6 +244,7 @@ Query recaps you already have (no new recording needed).
   ./catchup search mutex
   ./catchup ask what did we decide about billing
   ./catchup ask cs61a explain environment diagrams
+  ./catchup ask cs61a --closed what did lecture 3 say about heaps
   ./catchup quiz
   ./catchup todos
   ./catchup moments
@@ -262,6 +263,7 @@ CatchMeUp is the reader. You do not need Obsidian (or any other notes app).
   ./catchup cortex cs61a           # ASCII map in the terminal
   ./catchup trace cs61a mutex heaps
   ./catchup think cs61a explain mutexes for the midterm
+  ./catchup think cs61a --closed what did lecture say about mutexes
   ./catchup cortex cs61a --rebuild
 
 Optional extra — dump a vault if you already use Obsidian:
@@ -1010,21 +1012,29 @@ cmd_search() {
 }
 
 cmd_ask() {
+  local extra=()
+  local rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --closed) extra+=(--closed); shift ;;
+      *) rest+=("$1"); shift ;;
+    esac
+  done
+  set -- "${rest[@]}"
   if [[ $# -eq 0 ]]; then
-    err "Usage: ./catchup ask [brain|meeting|lecture] <question>"
+    err "Usage: ./catchup ask [brain|meeting|lecture] [--closed] <question>"
     exit 1
   fi
   header "Ask"
-  local extra=()
   if is_brain "${1:-}"; then
-    extra=(--brain "$1")
+    extra+=(--brain "$1")
     shift
   elif [[ -n "$(normalize_mode "${1:-}")" ]]; then
-    extra=(--mode "$(normalize_mode "$1")")
+    extra+=(--mode "$(normalize_mode "$1")")
     shift
   fi
   if [[ $# -eq 0 ]]; then
-    err "Usage: ./catchup ask [brain] <question>"
+    err "Usage: ./catchup ask [brain] [--closed] <question>"
     exit 1
   fi
   lib ask "${extra[@]}" "$@"
@@ -1497,9 +1507,19 @@ PY
 }
 
 cmd_think() {
+  local closed=0
+  local rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --closed) closed=1; shift ;;
+      *) rest+=("$1"); shift ;;
+    esac
+  done
+  set -- "${rest[@]}"
   if [[ $# -lt 2 ]]; then
-    err "Usage: ./catchup think <brain> <question or task>"
+    err "Usage: ./catchup think <brain> [--closed] <question or task>"
     echo "    ./catchup think cs61a explain mutexes for the midterm"
+    echo "    ./catchup think cs61a --closed what did lecture 3 say about heaps"
     echo "    ./catchup think acme-client what did we promise on billing?"
     exit 1
   fi
@@ -1511,12 +1531,13 @@ cmd_think() {
   fi
   header "Think · ${slug}"
   load_env
-  run_python - "$slug" "$*" <<'PY'
+  run_python - "$slug" "$*" "$closed" <<'PY'
 import sys
 from catchmeup import cortex
 from catchmeup import library
 library.load_env()
-print(cortex.think(sys.argv[1], sys.argv[2]))
+closed = sys.argv[3] == "1"
+print(cortex.think(sys.argv[1], sys.argv[2], closed=closed if closed else None))
 PY
 }
 

@@ -29,9 +29,10 @@ TOOLS = [
     {
         "name": "ask_brain",
         "description": (
-            "Ask a CatchMeUp specialist a question. It RAG-searches only that brain's "
-            "transcripts and notes (the recordings filed into that folder), then answers "
-            "in character. Use list_brains if you don't know the slug."
+            "Ask a CatchMeUp specialist a question. It RAG-searches that brain's "
+            "transcripts and notes, answers from those first, then may add a labeled "
+            "'Beyond the recordings' section. Set closed=true for exam mode "
+            "(notes only, no general knowledge). Use list_brains if you don't know the slug."
         ),
         "inputSchema": {
             "type": "object",
@@ -41,6 +42,13 @@ TOOLS = [
                     "description": "Brain slug, e.g. cs61a or acme-client",
                 },
                 "question": {"type": "string"},
+                "closed": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, answer only from recaps (exam mode). "
+                        "Default false: notes first, then labeled general help."
+                    ),
+                },
             },
             "required": ["brain", "question"],
         },
@@ -62,14 +70,18 @@ TOOLS = [
         "description": (
             "Deep multi-pass analysis in a CatchMeUp brain: decompose the task, "
             "activate related concepts in the cortex graph, gather cited evidence, "
-            "critique gaps, then synthesize. Use for in-depth questions, exam prep, "
-            "or decisions — not for a one-line lookup (use ask_brain for that)."
+            "critique gaps, then synthesize. Notes-first by default; set closed=true "
+            "to stay inside the recordings. Use ask_brain for a one-line lookup."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "brain": {"type": "string"},
                 "question": {"type": "string", "description": "Question or task"},
+                "closed": {
+                    "type": "boolean",
+                    "description": "If true, stay inside the recaps (exam mode).",
+                },
             },
             "required": ["brain", "question"],
         },
@@ -218,7 +230,12 @@ def _handle_tool(name: str, args: dict) -> dict:
         if not slug or not question:
             return _result_text("Need brain slug and question.")
         try:
-            answer = brains.ask_brain(slug, question, log=lambda *_: None)
+            closed = args.get("closed")
+            if isinstance(closed, str):
+                closed = closed.strip().lower() in {"1", "true", "yes", "on"}
+            elif closed is not None:
+                closed = bool(closed)
+            answer = brains.ask_brain(slug, question, log=lambda *_: None, closed=closed)
         except FileNotFoundError as e:
             return _result_text(str(e))
         return _result_text(answer)
@@ -229,7 +246,12 @@ def _handle_tool(name: str, args: dict) -> dict:
             return _result_text("Need brain slug and question.")
         from . import cortex
         try:
-            answer = cortex.think(slug, question, log=lambda *_: None)
+            closed = args.get("closed")
+            if isinstance(closed, str):
+                closed = closed.strip().lower() in {"1", "true", "yes", "on"}
+            elif closed is not None:
+                closed = bool(closed)
+            answer = cortex.think(slug, question, log=lambda *_: None, closed=closed)
         except FileNotFoundError as e:
             return _result_text(str(e))
         return _result_text(answer)

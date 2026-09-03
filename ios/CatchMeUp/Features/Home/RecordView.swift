@@ -5,6 +5,7 @@ struct RecordView: View {
     let onFinish: (UUID) -> Void
 
     @Environment(LibraryStore.self) private var store
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
     @State private var mode: Mode
@@ -235,8 +236,9 @@ struct RecordView: View {
         } else {
             Haptics.tap(.medium)
             Task {
-                let url = store.audioDir.appendingPathComponent(store.newAudioFilename())
-                do { try await recorder.start(to: url) } catch { permissionDenied = true }
+                let url = store.audio.directory.appendingPathComponent(store.audio.newFilename())
+                do { try await recorder.start(to: url, quality: settings.recordingQuality) }
+                catch { permissionDenied = true }
             }
         }
     }
@@ -253,6 +255,15 @@ struct RecordView: View {
                             duration: elapsed)
         store.upsert(rec)
         onFinish(rec.id)
+
+        // Measured after the fact so the size shows up on the storage screen
+        // without holding up the recap the user is waiting for. The encoder
+        // needs a moment to finish flushing the file it just closed.
+        Task {
+            if let facts = await AudioFile.facts(at: url) {
+                store.noteAudioFacts(rec.id, facts)
+            }
+        }
     }
 
     private func clock(_ t: TimeInterval) -> String {

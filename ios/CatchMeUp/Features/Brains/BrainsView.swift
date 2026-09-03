@@ -157,9 +157,11 @@ struct BrainDetailView: View {
         let id = UUID()
         let question: String
         var answer: String?
+        var error: String?
     }
 
     private var brain: Brain? { store.brain(brainID) }
+    private var accent: Color { brain?.mode.accent ?? .brand }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -337,32 +339,23 @@ struct BrainDetailView: View {
     }
 
     private var conversation: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let recaps = store.recordings(inBrain: brainID)
+
+        return VStack(alignment: .leading, spacing: 22) {
             ForEach(thread) { ex in
-                VStack(alignment: .trailing, spacing: 10) {
-                    Text(ex.question)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background((brain?.mode.accent ?? .brand).gradient,
-                                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                VStack(alignment: .leading, spacing: 12) {
+                    QuestionBubble(text: ex.question, tint: accent)
 
                     if let answer = ex.answer {
-                        Card {
-                            Text(answer)
-                                .font(.subheadline)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        BrainAnswerCard(raw: answer, tint: accent, recaps: recaps) {
+                            Task { await retry(ex.id) }
+                        }
+                    } else if let error = ex.error {
+                        BrainAnswerErrorCard(message: error) {
+                            Task { await retry(ex.id) }
                         }
                     } else {
-                        Card {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ShimmerLine()
-                                ShimmerLine(width: 220)
-                                ShimmerLine(width: 160)
-                            }
-                        }
+                        BrainThinkingCard(tint: accent, recapCount: recaps.count)
                     }
                 }
                 .id(ex.id)
@@ -416,15 +409,24 @@ struct BrainDetailView: View {
                 Button {
                     Task { await ask() }
                 } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background((brain?.mode.accent ?? .brand).gradient, in: Circle())
+                    ZStack {
+                        Circle().fill(accent.gradient)
+                        if asking {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 40, height: 40)
                 }
                 .buttonStyle(.plain)
                 .disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
-                .opacity(asking || question.trimmingCharacters(in: .whitespaces).isEmpty ? 0.4 : 1)
+                .opacity(question.trimmingCharacters(in: .whitespaces).isEmpty && !asking ? 0.4 : 1)
+                .animation(.quick, value: asking)
             }
         }
     }
@@ -433,20 +435,54 @@ struct BrainDetailView: View {
 
     private func ask() async {
         let q = question.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty, let brain else { return }
-
-        let recs = store.recordings(inBrain: brainID)
-        guard !recs.isEmpty else { askError = "This brain has no recaps yet."; return }
+        guard !q.isEmpty, brain != nil else { return }
+        guard !store.recordings(inBrain: brainID).isEmpty else {
+            askError = "This brain has no recaps yet."
+            Haptics.warning()
+            return
+        }
 
         question = ""
         askError = nil
-        asking = true
         Haptics.tap()
-        let exchange = QAExchange(question: q, answer: nil)
+        let exchange = QAExchange(question: q)
         withAnimation(.quick) { thread.append(exchange) }
+        await answer(exchange.id)
+    }
+
+    /// Re-runs one exchange in place, so a failure never loses the question.
+    private func retry(_ id: UUID) async {
+        guard let i = thread.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(.quick) {
+            thread[i].answer = nil
+            thread[i].error = nil
+        }
+        await answer(id)
+    }
+
+    private func answer(_ id: UUID) async {
+        guard let brain, let asked = thread.first(where: { $0.id == id })?.question else { return }
+        let recs = store.recordings(inBrain: brainID)
+
+        asking = true
         defer { asking = false }
 
-        let context = recs.prefix(12).map { rec -> String in
+        let engine = RecapEngineFactory.make(settings)
+        do {
+            let reply = try await engine.answer(question: asked, persona: brain.persona,
+                                                context: context(from: recs))
+            guard let i = thread.firstIndex(where: { $0.id == id }) else { return }
+            withAnimation(.gentle) { thread[i].answer = reply }
+            Haptics.success()
+        } catch {
+            guard let i = thread.firstIndex(where: { $0.id == id }) else { return }
+            withAnimation(.quick) { thread[i].error = error.localizedDescription }
+            Haptics.warning()
+        }
+    }
+
+    private func context(from recs: [Recording]) -> String {
+        let joined = recs.prefix(12).map { rec -> String in
             var s = "## \(rec.displayTitle)\n"
             if let t = rec.recap?.tldr { s += t.map { "- \($0)" }.joined(separator: "\n") + "\n" }
             if let n = rec.recap?.detailedNotes {
@@ -454,18 +490,6 @@ struct BrainDetailView: View {
             }
             return s
         }.joined(separator: "\n\n")
-
-        let engine = RecapEngineFactory.make(settings)
-        do {
-            let answer = try await engine.answer(question: q, persona: brain.persona,
-                                                 context: String(context.prefix(14000)))
-            if let i = thread.firstIndex(where: { $0.id == exchange.id }) {
-                withAnimation(.gentle) { thread[i].answer = answer }
-            }
-        } catch {
-            thread.removeAll { $0.id == exchange.id }
-            askError = error.localizedDescription
-            Haptics.warning()
-        }
+        return String(joined.prefix(14000))
     }
 }

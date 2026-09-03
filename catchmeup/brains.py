@@ -1,12 +1,15 @@
 """Folder brains: one specialist agent per subject or team.
 
 Each brain is a directory with a persona plus recaps filed into it.
-Asking that brain RAG-searches only its folder, then answers in character.
+Asking that brain keyword-RAG-searches only its folder (not a neural embedding
+model), then the configured LLM writes notes-first: lecture when we have it,
+labeled general help when we don't. Pass closed=True for exam mode.
 """
 from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +29,7 @@ from .paths import (
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 MEDIA_SUFFIXES = {".mov", ".mp4", ".m4a", ".mp3", ".wav", ".aac", ".mkv", ".webm"}
+VIDEO_SUFFIXES = {".mov", ".mp4", ".mkv", ".webm"}
 STOP = {
     "a", "an", "the", "of", "to", "for", "in", "on", "and", "or", "is", "was",
     "what", "who", "how", "why", "did", "does", "are", "be", "this", "that",
@@ -34,18 +38,53 @@ STOP = {
 
 DEFAULT_PERSONAS = {
     "lecture": (
-        "You are an all-knowing course specialist. You only teach from the recaps "
-        "and transcripts in this folder — lectures the student actually has. "
-        "Explain clearly, define terms, cite timestamps, and flag likely exam material. "
-        "If it was not in these recordings, say so."
+        "You are a course specialist for this folder of lectures. "
+        "Lead with what the recaps and transcripts actually said. "
+        "Explain clearly, define terms, cite timestamps, and flag likely exam material."
     ),
     "meeting": (
         "You are the institutional memory for this team, account, or project. "
-        "You only use the meeting recaps in this folder. Track decisions, owners, "
-        "deadlines, and open loops. Cite which meeting something came from. "
-        "If it was not discussed here, say so."
+        "Lead with what the meeting recaps actually said. Track decisions, owners, "
+        "deadlines, and open loops. Cite which meeting something came from."
     ),
 }
+
+# Claude/GPT/… is the writer. Numbered sources are the memory.
+CLOSED_BOOK_SYSTEM = (
+    "You are a closed-book specialist. Answer ONLY from the numbered sources in the "
+    "user message (recaps, lecture notes, transcripts, and concept cards from this "
+    "brain). Do not use pretrained knowledge, other courses, Wikipedia, or a "
+    "'typical' explanation. If a fact is not in the sources, say you do not have it "
+    "in these recordings — do not fill the gap. Cite sources as [1], [2]. Do not "
+    "invent examples, definitions, formulas, or caveats that the sources do not state."
+)
+
+NOTES_FIRST_SYSTEM = (
+    "You are a notes-first tutor. Numbered sources are this student's actual lectures "
+    "or meetings. Every answer has two labeled parts:\n"
+    "1. From your notes — only facts you can cite as [n]. If the sources do not cover "
+    "the question, say so in one sentence. Never pretend a recording covered something "
+    "it didn't.\n"
+    "2. Beyond the recordings — optional teaching that is NOT in the sources "
+    "(intuition, extra examples, related ideas). Label this section clearly. Never "
+    "mix this material into part 1.\n"
+    "If there are no numbered sources, part 1 is that it is not in these recordings, "
+    "and part 2 may still teach the idea."
+)
+
+EMPTY_SOURCES = "(no matching recap, note, or transcript chunks)"
+
+
+def want_closed(closed: bool | None = None) -> bool:
+    """Exam mode: notes only. Explicit flag wins; else CATCHMEUP_CLOSED=1."""
+    if closed is not None:
+        return bool(closed)
+    raw = (os.environ.get("CATCHMEUP_CLOSED") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def grounding_system(closed: bool | None = None) -> str:
+    return CLOSED_BOOK_SYSTEM if want_closed(closed) else NOTES_FIRST_SYSTEM
 
 
 def slugify(name: str) -> str:
@@ -184,9 +223,34 @@ def ingested_sources(slug: str) -> set[str]:
     return {str(rec.get("source") or "") for rec in iter_brain_records(slug)}
 
 
+def ingested_stems(slug: str) -> set[str]:
+    return {Path(name).stem for name in ingested_sources(slug) if name}
+
+
+def drop_ffmpeg_sidecars(files: list[Path]) -> list[Path]:
+    """Skip .mp3 next to a same-stem video (ffmpeg leftover in a library folder)."""
+    video_stems = {p.stem for p in files if p.suffix.lower() in VIDEO_SUFFIXES}
+    return [
+        p for p in files
+        if not (p.suffix.lower() == ".mp3" and p.stem in video_stems)
+    ]
+
+
+def already_ingested(slug: str, source: Path) -> bool:
+    name = source.name
+    stem = source.stem
+    return name in ingested_sources(slug) or stem in ingested_stems(slug)
+
+
 def pending_media(slug: str, path: Path) -> list[Path]:
-    have = ingested_sources(slug)
-    return [p for p in media_files(path) if p.name not in have]
+    have_names = ingested_sources(slug)
+    have_stems = ingested_stems(slug)
+    out = []
+    for p in drop_ffmpeg_sidecars(media_files(path)):
+        if p.name in have_names or p.stem in have_stems:
+            continue
+        out.append(p)
+    return out
 
 
 def keep_source(source: Path, brain_slug: str | None = None) -> bool:
@@ -236,6 +300,35 @@ def _tokens(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in STOP and len(w) > 2]
 
 
+def _note_files_for(rec: dict) -> list[tuple[str, str]]:
+    """Lecture-note markdown sitting next to the recap or copied into the brain notes folder."""
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    candidates: list[Path] = []
+    folder = Path(rec.get("_dir", ""))
+    if folder.is_dir():
+        candidates.extend(sorted(folder.glob("*.md")))
+    md_name = rec.get("markdown") or ""
+    slug = rec.get("brain")
+    if md_name and slug:
+        candidates.append(notes_dir(slug) / Path(str(md_name)).name)
+    for path in candidates:
+        try:
+            key = str(path.resolve())
+        except OSError:
+            continue
+        if key in seen or not path.is_file():
+            continue
+        seen.add(key)
+        try:
+            text = path.read_text()[:12000]
+        except OSError:
+            continue
+        if text.strip():
+            out.append((path.name, text))
+    return out
+
+
 def _chunks(rec: dict) -> list[tuple[str, str]]:
     """(label, text) pieces used for retrieval."""
     analysis = rec.get("analysis") or {}
@@ -276,7 +369,42 @@ def _chunks(rec: dict) -> list[tuple[str, str]]:
             piece = text[i : i + step + 200]
             if piece.strip():
                 chunks.append((f"{prefix} · transcript", piece))
+    for name, text in _note_files_for(rec):
+        chunks.append((f"{prefix} · notes {name}", text))
     return chunks
+
+
+def not_in_notes(slug: str, question: str = "") -> str:
+    hint = f" Try: ./catchup search {slug} <a word from lecture>" if slug else ""
+    return (
+        f"I don't have that in `{slug}`'s notes or transcripts — and I am not filling "
+        f"it in from general knowledge.{hint}"
+    )
+
+
+def format_evidence(
+    hits: list[dict],
+    fired: list[dict] | None = None,
+    budget: int = 42000,
+) -> str:
+    """Numbered closed-book sources the LLM is allowed to read."""
+    packed: list[str] = []
+    if fired:
+        lines = ["Activated concepts (from this brain's graph only):"]
+        for node in fired[:8]:
+            lines.append(
+                f"- {node.get('id')} ({node.get('kind')}) {node.get('definition') or ''}"
+            )
+        block = "\n".join(lines) + "\n"
+        packed.append(block)
+        budget -= len(block)
+    for i, hit in enumerate(hits, 1):
+        piece = f"[{i}] {hit.get('label')}\n{hit.get('text', '')}\n"
+        if budget - len(piece) < 0:
+            break
+        packed.append(piece)
+        budget -= len(piece)
+    return "\n".join(packed)
 
 
 def retrieve(question: str, records: list[dict], k: int = 12, boost: list[dict] | None = None) -> list[dict]:
@@ -339,7 +467,7 @@ def retrieve(question: str, records: list[dict], k: int = 12, boost: list[dict] 
     return out
 
 
-def ask_brain(slug: str, question: str, log=print) -> str:
+def ask_brain(slug: str, question: str, log=print, closed: bool | None = None) -> str:
     from .providers import complete_text
 
     brain = load_brain(slug)
@@ -349,6 +477,7 @@ def ask_brain(slug: str, question: str, log=print) -> str:
             f"Brain `{slug}` has no recaps yet. Drop a recording into "
             f"brains/{slug}/inbox/ or run: ./catchup into {slug} FILE"
         )
+    closed = want_closed(closed)
     fired: list[dict] = []
     try:
         from . import cortex as cortex_mod
@@ -358,35 +487,27 @@ def ask_brain(slug: str, question: str, log=print) -> str:
     except Exception:
         fired = []
     hits = retrieve(question, records, boost=fired)
-    if not hits:
-        hits = [{"label": rec.get("title"), "text": " ".join((rec.get("analysis") or {}).get("tldr") or [])} for rec in records[:6]]
-    packed = []
-    budget = 42000
-    if fired:
-        concept_lines = ["Activated concepts:"]
-        for node in fired[:8]:
-            concept_lines.append(
-                f"- {node.get('id')} ({node.get('kind')}) {node.get('definition') or ''}"
-            )
-        packed.append("\n".join(concept_lines) + "\n")
-        budget -= len(packed[-1])
-    for hit in hits:
-        piece = f"### {hit.get('label')}\n{hit.get('text', '')}\n"
-        if budget - len(piece) < 0:
-            break
-        packed.append(piece)
-        budget -= len(piece)
-    context = "\n".join(packed)
+    if closed and not hits:
+        return not_in_notes(slug, question)
+    context = format_evidence(hits, fired) if hits else EMPTY_SOURCES
+    if closed:
+        instruction = (
+            "Closed book: numbered sources only. Cite [n] and the recap title / "
+            "timestamp. If the answer is not in the sources, say you don't have it."
+        )
+    else:
+        instruction = (
+            "Notes first. Write **From your notes** (cite [n] when you can) then, "
+            "if the student still needs help, **Beyond the recordings** for anything "
+            "not in the sources. Do not mix the two."
+        )
     prompt = (
         f"{brain.get('persona')}\n\n"
         f"You are the specialist agent for **{brain.get('name')}** "
-        f"(folder `brains/{slug}/`). Use ONLY the retrieved notes and transcript "
-        f"chunks below. Cite the recap title and timestamps. If the answer is not "
-        f"in this brain, say you don't have it — do not borrow from general knowledge "
-        f"that wasn't in the recordings.\n\n"
-        f"Question: {question}\n\nRetrieved context:\n{context}"
+        f"(folder `brains/{slug}/`). {instruction}\n\n"
+        f"Question: {question}\n\nSources:\n{context}"
     )
-    return complete_text(prompt, log=log)
+    return complete_text(prompt, log=log, system=grounding_system(closed))
 
 
 def canonical_speaker_label(raw: str) -> str:
@@ -493,26 +614,23 @@ def grade_work(slug: str, work: str, assignment: str = "", log=print) -> str:
     except Exception:
         fired = []
     hits = retrieve(query, records, k=12, boost=fired)
-    packed = []
-    budget = 36000
-    for hit in hits:
-        piece = f"### {hit.get('label')}\n{hit.get('text', '')}\n"
-        if budget - len(piece) < 0:
-            break
-        packed.append(piece)
-        budget -= len(piece)
-    evidence = "\n".join(packed) if packed else "(no overlapping recap chunks)"
+    if not hits:
+        return (
+            f"No recap in `{slug}` overlaps this work, so I am not grading it from "
+            "general knowledge. File the relevant lecture first."
+        )
+    evidence = format_evidence(hits, fired, budget=36000)
     prompt = (
         f"{brain.get('persona')}\n\n"
-        f"Grade this student work using ONLY the recaps in **{brain.get('name')}**. "
+        f"Grade this student work using ONLY the numbered sources from **{brain.get('name')}**. "
         "Do not invent lecture content. Structure the reply as:\n"
         "1. Verdict: correct / partial / off\n"
-        "2. What matches the recordings (cite recap titles and timestamps)\n"
+        "2. What matches the recordings (cite [n], recap titles, timestamps)\n"
         "3. What's missing or contradicts the lectures\n"
         "4. What to clip or restudy next (`./catchup clip {slug} TERM`)\n"
         "If the work uses ideas that were never in these recordings, say so.\n\n"
         f"Assignment prompt (may be empty): {assignment or '(none given)'}\n\n"
         f"Student work:\n{work[:12000]}\n\n"
-        f"Evidence from recaps:\n{evidence}"
+        f"Sources:\n{evidence}"
     )
-    return complete_text(prompt, log=log)
+    return complete_text(prompt, log=log, system=CLOSED_BOOK_SYSTEM)

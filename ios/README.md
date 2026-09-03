@@ -77,6 +77,13 @@ lectures), corner radii, motion curves, the ambient background wash and haptics.
 `WaveBars`, `BrandMark` (the app icon's constellation, redrawn in SwiftUI) and
 the button styles. Add UI by composing these rather than restyling in place.
 
+`Design/Markdown.swift` renders model prose. Anything the model writes — a brain
+answer, a detailed note, a bullet — goes through `MarkdownText` (block layout:
+headings, lists, quotes, fenced code, tables, rules) or `Text(md:)` for a single
+inline string. Never put a model's output in a plain `Text`, or the reader sees
+the `**` and `##` instead of the formatting. Both take a `MarkdownStyle`, whose
+`tint` should be the surrounding mode accent.
+
 ### iCloud sync
 
 Off by default. Turn it on in **Settings ▸ Sync**. It uses the app's iCloud Drive

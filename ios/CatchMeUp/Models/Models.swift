@@ -181,12 +181,61 @@ struct Recording: Codable, Identifiable, Hashable {
     /// Indices of `recap.actionItems` the user has ticked off.
     var completedActions: [Int] = []
 
+    // MARK: Audio bookkeeping
+    //
+    // What we last measured about the file, so the storage screen and the
+    // optimizer never have to open every recording to answer a question.
+    // `AudioStorage` owns the file itself; these are just notes about it.
+
+    var audioBytes: Int64?
+    var audioCodec: String?
+    var audioBitRate: Int?
+    var audioSampleRate: Int?
+    var audioChannels: Int?
+    /// The user kept the notes and deleted the audio on purpose.
+    var audioRemoved = false
+    /// Pinned for offline use — never evicted to reclaim space.
+    var keepAudioDownloaded = false
+    var lastPlayedAt: Date?
+    /// Set by a cloud backend that hands out its own asset identifiers.
+    var cloudAssetID: String?
+    /// A conversion already failed on this file, so leave it alone until asked.
+    var optimizeFailed = false
+
     var displayTitle: String {
         if let t = recap?.title, !t.isEmpty { return t }
         return title
     }
 
     var isProcessed: Bool { recap != nil }
+
+    var hasAudio: Bool { audioFilename != nil && !audioRemoved }
+
+    /// What we know about the file. Nil until something has actually read it —
+    /// which is deliberate: an unmeasured file is never assumed to be oversized.
+    var audioFacts: AudioFacts? {
+        guard let audioCodec else { return nil }
+        return AudioFacts(byteSize: audioBytes ?? 0, duration: duration, codec: audioCodec,
+                          bitRate: audioBitRate, sampleRate: audioSampleRate, channels: audioChannels)
+    }
+
+    var audioFormatLabel: String? { audioFacts?.formatLabel }
+
+    mutating func apply(_ facts: AudioFacts) {
+        audioBytes = facts.byteSize
+        audioCodec = facts.codec
+        audioBitRate = facts.bitRate
+        audioSampleRate = facts.sampleRate
+        audioChannels = facts.channels
+        if facts.duration > 0 { duration = facts.duration }
+    }
+
+    /// Whether re-encoding this file would actually buy anything. Unmeasured
+    /// audio says no — the optimizer measures first, then asks again.
+    func needsOptimizing(target: AudioQuality) -> Bool {
+        guard hasAudio, !optimizeFailed, let audioFacts else { return false }
+        return !target.isSatisfied(by: audioFacts)
+    }
 
     var needsAttention: Bool { processingError != nil && recap == nil }
 
@@ -214,6 +263,8 @@ struct Recording: Codable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, deleted, mode, audioFilename
         case duration, segments, recap, brainID, processingError, completedActions
+        case audioBytes, audioCodec, audioBitRate, audioSampleRate, audioChannels
+        case audioRemoved, keepAudioDownloaded, lastPlayedAt, cloudAssetID, optimizeFailed
     }
 
     init(from d: Decoder) throws {
@@ -231,6 +282,16 @@ struct Recording: Codable, Identifiable, Hashable {
         brainID = try c.decodeIfPresent(UUID.self, forKey: .brainID)
         processingError = try c.decodeIfPresent(String.self, forKey: .processingError)
         completedActions = try c.decodeIfPresent([Int].self, forKey: .completedActions) ?? []
+        audioBytes = try c.decodeIfPresent(Int64.self, forKey: .audioBytes)
+        audioCodec = try c.decodeIfPresent(String.self, forKey: .audioCodec)
+        audioBitRate = try c.decodeIfPresent(Int.self, forKey: .audioBitRate)
+        audioSampleRate = try c.decodeIfPresent(Int.self, forKey: .audioSampleRate)
+        audioChannels = try c.decodeIfPresent(Int.self, forKey: .audioChannels)
+        audioRemoved = try c.decodeIfPresent(Bool.self, forKey: .audioRemoved) ?? false
+        keepAudioDownloaded = try c.decodeIfPresent(Bool.self, forKey: .keepAudioDownloaded) ?? false
+        lastPlayedAt = try c.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
+        cloudAssetID = try c.decodeIfPresent(String.self, forKey: .cloudAssetID)
+        optimizeFailed = try c.decodeIfPresent(Bool.self, forKey: .optimizeFailed) ?? false
     }
 }
 

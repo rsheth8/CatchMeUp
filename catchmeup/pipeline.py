@@ -544,6 +544,10 @@ def persist_recap(
 
     archive_dir.mkdir(parents=True, exist_ok=True)
     (archive_dir / "transcript.txt").write_text(transcript_text)
+    if md_path and md_path.exists():
+        dest_md = archive_dir / md_path.name
+        if dest_md.resolve() != md_path.resolve():
+            dest_md.write_text(md_path.read_text())
     record = {
         "version": 1,
         "mode": mode,
@@ -611,7 +615,7 @@ def process_recording(source: Path, mode: str | None, brain_slug: str | None) ->
     if not resolve_api_key(provider) and provider != "ollama":
         raise RuntimeError(f"no API key for {provider} — run ./catchup config {provider}")
 
-    if brain_slug and source.name in brains_mod.ingested_sources(brain_slug):
+    if brain_slug and brains_mod.already_ingested(brain_slug, source):
         log(f"Skip (already in {brain_slug}): {source.name}")
         print(f"Already filed: {source.name}", flush=True)
         return

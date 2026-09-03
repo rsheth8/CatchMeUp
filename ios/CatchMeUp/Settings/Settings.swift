@@ -90,6 +90,26 @@ final class AppSettings {
     var customBaseURL: String { didSet { d.set(customBaseURL, forKey: "customBaseURL") } }
     var defaultMode: Mode { didSet { d.set(defaultMode.rawValue, forKey: "defaultMode") } }
 
+    // MARK: Audio storage
+
+    var recordingQuality: AudioQuality {
+        didSet { d.set(recordingQuality.rawValue, forKey: "recordingQuality") }
+    }
+    /// Re-encode oversized imports down to `recordingQuality` in the background.
+    var optimizeImports: Bool { didSet { d.set(optimizeImports, forKey: "optimizeImports") } }
+    var audioRetention: AudioRetention {
+        didSet { d.set(audioRetention.rawValue, forKey: "audioRetention") }
+    }
+    /// Whether retention is allowed to delete audio this device holds the only
+    /// copy of. Off unless the user has been told it can't be undone.
+    var allowLocalAudioDeletion: Bool {
+        didSet { d.set(allowLocalAudioDeletion, forKey: "allowLocalAudioDeletion") }
+    }
+    /// With iCloud on, drop local copies of older unpinned recordings.
+    var optimizeCloudStorage: Bool {
+        didSet { d.set(optimizeCloudStorage, forKey: "optimizeCloudStorage") }
+    }
+
     /// Kept in the Keychain, not UserDefaults.
     var apiKey: String {
         didSet { Keychain.set(apiKey, for: "apiKey") }
@@ -105,6 +125,15 @@ final class AppSettings {
         model = dd.string(forKey: "model") ?? Providers.by(dd.string(forKey: "providerID") ?? "anthropic").defaultModel
         customBaseURL = dd.string(forKey: "customBaseURL") ?? ""
         defaultMode = Mode(rawValue: dd.string(forKey: "defaultMode") ?? "") ?? .meeting
+        recordingQuality = AudioQuality(rawValue: dd.string(forKey: "recordingQuality") ?? "")
+            ?? .fallback
+        // Absent rather than false on a fresh install — tidying up imports is
+        // the behaviour people expect by default.
+        optimizeImports = dd.object(forKey: "optimizeImports") as? Bool ?? true
+        audioRetention = AudioRetention(rawValue: dd.string(forKey: "audioRetention") ?? "")
+            ?? .fallback
+        allowLocalAudioDeletion = dd.bool(forKey: "allowLocalAudioDeletion")
+        optimizeCloudStorage = dd.bool(forKey: "optimizeCloudStorage")
         apiKey = Keychain.get("apiKey") ?? ""
     }
 

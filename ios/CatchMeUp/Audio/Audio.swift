@@ -29,7 +29,7 @@ final class AudioRecorder: NSObject {
     /// Activating the audio session and starting the hardware can take a long
     /// time — and blocks outright when there's no input device — so it happens
     /// off the main thread and the UI flips to "recording" as soon as it's live.
-    func start(to url: URL) async throws {
+    func start(to url: URL, quality: AudioQuality = .fallback) async throws {
         isRecording = true
         isStarting = true
         isPaused = false
@@ -40,7 +40,7 @@ final class AudioRecorder: NSObject {
 
         let live: AVAudioRecorder
         do {
-            live = try await Self.begin(at: url)
+            live = try await Self.begin(at: url, quality: quality)
         } catch {
             isRecording = false
             isStarting = false
@@ -60,7 +60,8 @@ final class AudioRecorder: NSObject {
         timer = t
     }
 
-    private nonisolated static func begin(at url: URL) async throws -> AVAudioRecorder {
+    private nonisolated static func begin(at url: URL,
+                                          quality: AudioQuality) async throws -> AVAudioRecorder {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
@@ -69,13 +70,16 @@ final class AudioRecorder: NSObject {
                                             options: [.defaultToSpeaker, .allowBluetooth])
                     try session.setActive(true)
 
-                    let settings: [String: Any] = [
-                        AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                        AVSampleRateKey: 44_100,
-                        AVNumberOfChannelsKey: 1,
-                        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-                    ]
-                    let rec = try AVAudioRecorder(url: url, settings: settings)
+                    // Some routes refuse the reduced sample rate. Falling back
+                    // to 44.1 kHz costs space but never costs the recording.
+                    let rec: AVAudioRecorder
+                    do {
+                        rec = try AVAudioRecorder(url: url, settings: quality.recorderSettings)
+                    } catch {
+                        var relaxed = quality.recorderSettings
+                        relaxed[AVSampleRateKey] = 44_100
+                        rec = try AVAudioRecorder(url: url, settings: relaxed)
+                    }
                     rec.isMeteringEnabled = true
                     rec.record()
                     continuation.resume(returning: rec)

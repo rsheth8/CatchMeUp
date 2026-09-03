@@ -48,6 +48,8 @@ class CliTests(IsolatedHome):
         self.assertIn("Practice test", page.stdout)
         self.assertIn("--print", page.stdout)
         self.assertIn("drill", page.stdout.lower())
+        ask = self.run_cli("help", "ask")
+        self.assertIn("--closed", ask.stdout)
         rec = self.run_cli("help", "rec")
         self.assertIn("microphone", rec.stdout.lower())
         self.assertIn("--system", rec.stdout)

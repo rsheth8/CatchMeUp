@@ -19,8 +19,6 @@ from pathlib import Path
 from . import brains as brains_mod
 from .paths import RECORD_NAME
 
-MAX_ASK_CHARS = 48000
-
 
 def load_env():
     brains_mod.load_env()
@@ -177,74 +175,50 @@ def cmd_search(query: str, mode: str | None, brain: str | None = None):
         print()
 
 
-def _pack_recap(rec: dict, include_transcript: bool, budget: int) -> str:
-    analysis = rec.get("analysis") or {}
-    lines = [
-        f"# {rec.get('title') or rec.get('source')} ({rec.get('mode')})",
-        f"source: {rec.get('source')}  date: {rec.get('recorded_at')}",
-    ]
-    if analysis.get("tldr"):
-        lines.append("TL;DR / what you missed:")
-        lines.extend(f"- {b}" for b in analysis["tldr"])
-    if analysis.get("action_items"):
-        lines.append("Action items:")
-        lines.extend(f"- {b}" for b in analysis["action_items"])
-    if analysis.get("terms"):
-        lines.append("Terms:")
-        for term in analysis["terms"]:
-            if isinstance(term, dict):
-                lines.append(f"- {term.get('term')}: {term.get('definition')}")
-            else:
-                lines.append(f"- {term}")
-    if analysis.get("study"):
-        lines.append("Study:")
-        lines.extend(f"- {b}" for b in analysis["study"])
-    for bm in analysis.get("bookmarks") or []:
-        if isinstance(bm, dict):
-            lines.append(f"[{bm.get('timestamp')}] {bm.get('heading')}: {bm.get('insight')}")
-    for section in analysis.get("detailed_notes") or []:
-        if isinstance(section, dict):
-            lines.append(f"## {section.get('heading')}")
-            lines.append(section.get("content") or "")
-    blob = "\n".join(lines)
-    if include_transcript:
-        folder = Path(rec.get("_dir", ""))
-        tpath = folder / "transcript.txt"
-        if tpath.exists():
-            blob += "\nTranscript:\n" + tpath.read_text()
-    return blob[:budget]
-
-
-def cmd_ask(question: str, mode: str | None, brain: str | None = None):
+def cmd_ask(question: str, mode: str | None, brain: str | None = None, closed: bool | None = None):
     load_env()
     if not question.strip():
         print("Usage: ./catchup ask [brain] <your question>")
         sys.exit(1)
     if brain:
-        print(brains_mod.ask_brain(brain, question, log=lambda m: print(f"[{m}]", file=sys.stderr)))
+        print(brains_mod.ask_brain(
+            brain, question, log=lambda m: print(f"[{m}]", file=sys.stderr), closed=closed,
+        ))
         return
-    rows = search_records(question, mode) or list_records(mode)
+    rows = list_records(mode)
     if not rows:
         print("Nothing in the library yet. Recap a recording first.")
         sys.exit(1)
-    chunks = []
-    remaining = MAX_ASK_CHARS
-    for rec in rows[:12]:
-        if remaining < 800:
-            break
-        piece = _pack_recap(rec, include_transcript=len(rows) <= 3, budget=remaining)
-        chunks.append(piece)
-        remaining -= len(piece)
-    context = "\n\n---\n\n".join(chunks)
+    hits = brains_mod.retrieve(question, rows)
+    closed = brains_mod.want_closed(closed)
+    if closed and not hits:
+        print(
+            "Nothing in the library matched that question. "
+            "Not guessing from general knowledge."
+        )
+        sys.exit(1)
+    context = brains_mod.format_evidence(hits) if hits else brains_mod.EMPTY_SOURCES
+    if closed:
+        instruction = (
+            "Closed book: numbered sources only. Cite [n] plus the recap title "
+            "and timestamps. If the library does not contain the answer, say so."
+        )
+    else:
+        instruction = (
+            "Notes first. Write **From your notes** (cite [n]) then, if needed, "
+            "**Beyond the recordings** for anything not in the sources."
+        )
     prompt = (
-        "You are CatchMeUp. The user missed these meetings and/or lectures. "
-        "Answer ONLY from the library below. Cite the recap title and timestamps when you can. "
-        "If the library does not contain the answer, say so — do not invent.\n\n"
-        f"Question: {question}\n\nLibrary:\n{context}"
+        f"You are CatchMeUp. {instruction}\n\n"
+        f"Question: {question}\n\nSources:\n{context}"
     )
     from .providers import complete_text
 
-    print(complete_text(prompt, log=lambda m: print(f"[{m}]", file=sys.stderr)))
+    print(complete_text(
+        prompt,
+        log=lambda m: print(f"[{m}]", file=sys.stderr),
+        system=brains_mod.grounding_system(closed),
+    ))
 
 
 def _terms_from(rec: dict) -> list[tuple[str, str]]:
@@ -762,6 +736,11 @@ def main(argv=None):
             p.add_argument("query", nargs="+")
         elif name == "ask":
             p.add_argument("question", nargs="+")
+            p.add_argument(
+                "--closed",
+                action="store_true",
+                help="Exam mode: answer only from recaps, no general knowledge",
+            )
         elif name == "quiz":
             p.add_argument("-n", "--count", type=int, default=8)
         elif name == "play":
@@ -777,7 +756,12 @@ def main(argv=None):
     elif args.cmd == "search":
         cmd_search(" ".join(args.query), mode, brain=brain)
     elif args.cmd == "ask":
-        cmd_ask(" ".join(args.question), mode, brain=brain)
+        cmd_ask(
+            " ".join(args.question),
+            mode,
+            brain=brain,
+            closed=True if getattr(args, "closed", False) else None,
+        )
     elif args.cmd == "quiz":
         cmd_quiz(mode, args.count, brain=brain)
     elif args.cmd == "todos":

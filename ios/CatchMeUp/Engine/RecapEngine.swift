@@ -53,9 +53,24 @@ struct MockRecapEngine: RecapEngine {
         return mode == .lecture ? SampleData.lectureRecap : SampleData.meetingRecap
     }
 
+    /// Written as Markdown so Demo mode shows the real answer layout.
     func answer(question: String, persona: String, context: String) async throws -> String {
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        return "Demo mode doesn't call a model. Switch to On-device or your API key in Settings to ask real questions about this brain."
+        try? await Task.sleep(nanoseconds: 1_400_000_000)
+        return """
+        Demo mode doesn't call a model, so here's what a real answer looks like.
+
+        ## Where answers come from
+        - **Your recaps only** — the model sees the notes in this brain, nothing else.
+        - **Cited** — every answer names the recaps it leaned on, and you can tap through to them.
+
+        ## Turning it on
+        Open **Settings ▸ Recap engine** and pick either:
+
+        1. *On-device* — Apple's model, needs iOS 26 and Apple Intelligence.
+        2. *Your API key* — Anthropic or any OpenAI-compatible endpoint.
+
+        > Audio and transcripts never leave the device on the on-device path.
+        """
     }
 }
 

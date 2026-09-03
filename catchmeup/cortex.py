@@ -557,8 +557,6 @@ def _pack_activated(slug: str, question: str, fired: list[dict]) -> str:
             rest.append(rec)
     ordered = boosted + rest
     hits = brains.retrieve(question, ordered, k=10)
-    if not hits:
-        hits = [{"label": rec.get("title"), "text": " ".join((rec.get("analysis") or {}).get("tldr") or [])} for rec in ordered[:5]]
     concept_block = "Activated concepts:\n"
     for node in fired:
         concept_block += (
@@ -567,11 +565,13 @@ def _pack_activated(slug: str, question: str, fired: list[dict]) -> str:
             f"  {node.get('definition') or ''}\n"
             f"  linked: {', '.join(node.get('neighbors') or [])}\n"
         )
-    evidence = "\n".join(f"### {h.get('label')}\n{h.get('text')}\n" for h in hits)
-    return concept_block + "\nEvidence from episodes:\n" + evidence
+    if hits:
+        evidence = brains.format_evidence(hits, budget=36000)
+        return concept_block + "\nSources from episodes:\n" + evidence
+    return concept_block + "\nSources from episodes:\n(none matched — do not invent)\n"
 
 
-def think(slug: str, question: str, log=print) -> str:
+def think(slug: str, question: str, log=print, closed: bool | None = None) -> str:
     """Multi-pass analysis: decompose → activate → evidence → critique → synthesize."""
     brain = brains.load_brain(slug)
     records = list(brains.iter_brain_records(slug))
@@ -586,15 +586,42 @@ def think(slug: str, question: str, log=print) -> str:
 
     from . import viz
 
+    closed = brains.want_closed(closed)
+    if closed and not activate(slug, question, hops=2, top=8) and not brains.retrieve(question, records):
+        return brains.not_in_notes(slug, question)
+
     log(viz.pass_line(1, 4, "decompose the task"))
+    known = [
+        n["id"]
+        for n in sorted(
+            (load_cortex(slug).get("nodes") or {}).values(),
+            key=lambda node: -int(node.get("weight") or 0),
+        )
+    ][:80]
+    if closed:
+        decompose_extra = (
+            "Prefer concept names from this brain's known list. Do not invent topics "
+            "from general knowledge or another course. If the task is outside this brain, "
+            "set task_type to other and say so in a subquestion.\n"
+        )
+        decompose_system = brains.CLOSED_BOOK_SYSTEM
+    else:
+        decompose_extra = (
+            "Prefer concept names from this brain's known list for what the recordings "
+            "cover. Extra concepts needed to teach a gap are allowed.\n"
+        )
+        decompose_system = brains.NOTES_FIRST_SYSTEM
     plan = complete_json(
         "Return ONLY JSON with this shape:\n"
         '{"task_type": "explain|compare|exam|decide|plan|other",'
         ' "subquestions": ["...", "..."],'
         ' "concepts": ["short concept names"]}\n'
         "Decompose this user task into 3-6 subquestions and the key concepts.\n"
+        f"{decompose_extra}"
+        f"Known concepts: {json.dumps(known)}\n"
         f"Task: {question}",
         log=log,
+        system=decompose_system,
     )
     subqs = plan.get("subquestions") or [question]
     concepts = plan.get("concepts") or []
@@ -614,9 +641,11 @@ def think(slug: str, question: str, log=print) -> str:
         ' "missing": ["what the recordings do not cover"]}\n'
         f"You are {brain.get('name')} ({brain.get('kind')}). "
         "Extract concrete claims that answer the subquestions. "
-        "Use ONLY the activated concepts and episode evidence. Do not invent.\n\n"
+        "Use ONLY the activated concepts and numbered sources. Do not invent. "
+        "If a subquestion is not in the sources, put it in missing — do not answer from general knowledge.\n\n"
         f"Task type: {task_type}\nSubquestions: {json.dumps(subqs)}\n\n{packed}",
         log=log,
+        system=brains.CLOSED_BOOK_SYSTEM,
     )
 
     log(viz.pass_line(3, 4, "critique contradictions and gaps"))
@@ -626,27 +655,46 @@ def think(slug: str, question: str, log=print) -> str:
         ' "gaps": ["what we still cannot answer from these recordings"],'
         ' "exam_or_action": ["what to study, decide, or do next"]}\n'
         f"Persona: {brain.get('persona')}\n"
-        f"Task: {question}\nClaims: {json.dumps(evidence)}\n",
+        f"Task: {question}\nClaims: {json.dumps(evidence)}\n"
+        "Critique only these claims. Do not introduce facts that are not in Claims.",
         log=log,
+        system=brains.CLOSED_BOOK_SYSTEM,
     )
 
     log(viz.pass_line(4, 4, "synthesize the deep answer"))
+    if closed:
+        shape = (
+            "1. Direct answer\n"
+            "2. How the ideas connect in this brain (use the activated concepts)\n"
+            "3. Evidence from specific recaps / timestamps\n"
+            "4. Tensions, open loops, or likely exam angles\n"
+            "5. What to do next\n"
+            "If something is not in the recordings, say so plainly. "
+            "Do not fill gaps from general knowledge."
+        )
+        synth_system = brains.CLOSED_BOOK_SYSTEM
+    else:
+        shape = (
+            "1. Direct answer from the recordings\n"
+            "2. How the ideas connect in this brain (use the activated concepts)\n"
+            "3. Evidence from specific recaps / timestamps\n"
+            "4. Tensions, open loops, or likely exam angles\n"
+            "5. What to do next\n"
+            "6. Beyond the recordings — teach anything in Critique.gaps / Claims.missing. "
+            "Label this section. Do not mix it into 1–5."
+        )
+        synth_system = brains.NOTES_FIRST_SYSTEM
     synthesis = complete_text(
         f"{brain.get('persona')}\n\n"
         f"You are the cortical specialist for **{brain.get('name')}**. "
-        "Write an in-depth analysis the user can act on. Structure it as:\n"
-        "1. Direct answer\n"
-        "2. How the ideas connect in this brain (use the activated concepts)\n"
-        "3. Evidence from specific recaps / timestamps\n"
-        "4. Tensions, open loops, or likely exam angles\n"
-        "5. What to do next\n"
-        "If something is not in the recordings, say so plainly.\n\n"
+        f"Write an in-depth analysis the user can act on. Structure it as:\n{shape}\n\n"
         f"User task: {question}\n"
         f"Task type: {task_type}\n"
         f"Activated concepts: {json.dumps([{k: n[k] for k in ('id','kind','activation','neighbors') if k in n} for n in fired], indent=2)}\n"
         f"Claims: {json.dumps(evidence, indent=2)}\n"
         f"Critique: {json.dumps(critique, indent=2)}\n",
         log=log,
+        system=synth_system,
     )
     return synthesis.strip()
 

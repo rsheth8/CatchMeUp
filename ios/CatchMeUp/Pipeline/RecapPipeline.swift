@@ -40,7 +40,8 @@ final class RecapPipeline {
         stage = .transcribing(0)
         let transcriber: Transcriber = settings.engineKind == .demo ? MockTranscriber() : SpeechTranscriber()
         do {
-            if let audio = store.audioURL(for: rec) {
+            // Pulls the file down from iCloud first when it isn't on the device.
+            if let audio = try? await store.audio.ensureLocal(for: rec) {
                 let segments = try await transcriber.transcribe(url: audio) { [weak self] p in
                     Task { @MainActor in
                         self?.stage = .transcribing(p)
@@ -48,7 +49,9 @@ final class RecapPipeline {
                     }
                 }
                 rec.segments = segments
-                rec.duration = try await AVURLAsset(url: audio).load(.duration).seconds
+                // One read covers duration, size and format, which is what the
+                // storage screen and the optimizer both need.
+                if let facts = await AudioFile.facts(at: audio) { rec.apply(facts) }
             } else if rec.segments.isEmpty {
                 rec.segments = SampleData.meetingRecording.segments
             }

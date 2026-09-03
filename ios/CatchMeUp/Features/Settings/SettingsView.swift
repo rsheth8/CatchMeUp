@@ -71,12 +71,44 @@ struct SettingsView: View {
                     Toggle(isOn: Binding(get: { store.syncEnabled }, set: { store.syncEnabled = $0 })) {
                         Label("Sync with iCloud", systemImage: "icloud")
                     }
+                    .disabled(store.migration.isRunning)
+
+                    if store.migration.isRunning {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small)
+                            Text(store.migration.text)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } header: {
                     Text("Sync")
                 } footer: {
-                    Label(store.syncStatus.text, systemImage: store.syncStatus.symbolName)
-                        .font(.footnote)
-                        .foregroundStyle(store.syncStatus.isProblem ? .orange : .secondary)
+                    if case .finished(let report) = store.migration {
+                        Label(report.summary,
+                              systemImage: report.isProblem ? "exclamationmark.icloud" : "checkmark.icloud")
+                            .font(.footnote)
+                            .foregroundStyle(report.isProblem ? .orange : .secondary)
+                    } else {
+                        Label(store.syncStatus.text, systemImage: store.syncStatus.symbolName)
+                            .font(.footnote)
+                            .foregroundStyle(store.syncStatus.isProblem ? .orange : .secondary)
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        StorageView()
+                    } label: {
+                        LabeledContent {
+                            Text(byteText(store.estimatedAudioBytes))
+                                .monospacedDigit()
+                        } label: {
+                            Label("Storage", systemImage: "internaldrive")
+                        }
+                    }
+                } footer: {
+                    Text("See what your audio is using, make existing recordings smaller, export a backup, or free up space.")
                 }
 
                 Section {
@@ -116,10 +148,20 @@ struct SettingsView: View {
                         Label("Start recordings as", systemImage: "slider.horizontal.3")
                     }
                     .pickerStyle(.menu)
+
+                    NavigationLink {
+                        StorageView()
+                    } label: {
+                        LabeledContent {
+                            Text(settings.recordingQuality.title)
+                        } label: {
+                            Label("Quality", systemImage: "waveform")
+                        }
+                    }
                 } header: {
                     Text("Recording")
                 } footer: {
-                    Text("You can still switch mode on the recording screen before you hit record.")
+                    Text("You can still switch mode on the recording screen before you hit record. \(settings.recordingQuality.title) records mono AAC at about \(settings.recordingQuality.sizeEstimate.replacingOccurrences(of: "≈", with: "")).")
                 }
 
                 Section {

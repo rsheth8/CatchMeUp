@@ -60,13 +60,27 @@ enum Prompts {
     }
 
     // Ask (RAG over a brain)
+
+    /// The answer is rendered as Markdown on a phone screen, so the shape of it
+    /// matters as much as the content.
+    static let answerFormat = """
+    Formatting:
+    - Open with a direct one or two sentence answer. No heading above it.
+    - Then use `## ` headings only if the answer really has two or more parts. Never use `#`.
+    - Prefer short bullets over long paragraphs, and bold the term each bullet is about.
+    - Put code in a fenced block with its language. Keep formulas as plain text, not LaTeX.
+    - Aim for under 250 words unless a plan or list was asked for.
+    - Finish with one last line, exactly: `Sources: <recap title>, <recap title>`
+    """
+
     static func askPrompt(question: String, persona: String, context: String) -> String {
         let voice = persona.isEmpty ? "You answer questions about a set of recap notes." : persona
         return """
         \(voice)
 
         Answer the question using ONLY the notes below. If the notes don't cover it, say so.
-        Cite the recap titles you used in parentheses.
+
+        \(answerFormat)
 
         --- NOTES ---
         \(context)

@@ -41,6 +41,7 @@ struct LibraryView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(AppRouter.self) private var router
+    @Environment(AudioOptimizer.self) private var optimizer
 
     @State private var showImporter = false
     @State private var filter: LibraryFilter = .all
@@ -383,13 +384,22 @@ struct LibraryView: View {
 
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
-        guard let filename = store.importAudio(from: url, preferredName: url.lastPathComponent) else { return }
-        let rec = Recording(title: url.deletingPathExtension().lastPathComponent,
-                            mode: Mode.guess(fromFilename: url.lastPathComponent),
-                            audioFilename: filename)
-        store.upsert(rec)
-        Haptics.success()
-        router.libraryPath.append(rec.id)
+        Task {
+            guard let imported = await store.audio.importFile(from: url) else { return }
+            var rec = Recording(title: url.deletingPathExtension().lastPathComponent,
+                                mode: Mode.guess(fromFilename: url.lastPathComponent),
+                                audioFilename: imported.filename)
+            if let facts = imported.facts { rec.apply(facts) }
+            store.upsert(rec)
+            Haptics.success()
+            router.libraryPath.append(rec.id)
+
+            // The file goes in as-is so the recap starts immediately; a 192 kbps
+            // stereo MP3 gets standardised afterwards, in the background.
+            if settings.optimizeImports, rec.needsOptimizing(target: settings.recordingQuality) {
+                optimizer.optimize(rec.id, store: store, target: settings.recordingQuality)
+            }
+        }
     }
 }
 

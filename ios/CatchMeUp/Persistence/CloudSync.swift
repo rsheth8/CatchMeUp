@@ -46,4 +46,44 @@ enum CloudSync {
 
         var isProblem: Bool { if case .unavailable = self { return true } else { return false } }
     }
+
+    /// What a finished migration actually did, in words the user can act on.
+    struct Report: Equatable, Sendable {
+        var moved: Int
+        var skipped: Int
+        var notDownloaded: Int
+        var failed: Int
+        var bytes: Int64
+        var toCloud: Bool
+
+        init(_ report: CloudMigration.Report, toCloud: Bool) {
+            moved = report.moved
+            skipped = report.skipped
+            notDownloaded = report.notDownloaded
+            failed = report.failed
+            bytes = report.bytes
+            self.toCloud = toCloud
+        }
+
+        var isProblem: Bool { failed > 0 }
+
+        var summary: String {
+            var sentences: [String] = []
+            if moved > 0 {
+                let where_ = toCloud ? "to iCloud" : "to this iPhone"
+                sentences.append("Moved \(moved) recording\(moved == 1 ? "" : "s") \(where_) (\(byteText(bytes))).")
+            } else if skipped > 0 && failed == 0 {
+                sentences.append("Everything was already in place.")
+            } else if failed == 0 {
+                sentences.append("Nothing needed moving.")
+            }
+            if notDownloaded > 0 {
+                sentences.append("\(notDownloaded) recording\(notDownloaded == 1 ? " is" : "s are") still only in iCloud — they'll download when you play them.")
+            }
+            if failed > 0 {
+                sentences.append("\(failed) couldn't be moved and were left where they are.")
+            }
+            return sentences.joined(separator: " ")
+        }
+    }
 }

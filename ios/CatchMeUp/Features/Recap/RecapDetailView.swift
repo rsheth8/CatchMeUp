@@ -6,7 +6,10 @@ struct RecapDetailView: View {
 
     @Environment(LibraryStore.self) private var store
     @Environment(ProcessingQueue.self) private var queue
+    @Environment(StudyStore.self) private var study
     @Environment(\.dismiss) private var dismiss
+
+    @State private var practising = false
 
     @State private var player = AudioPlayer()
     @State private var showTranscript = false
@@ -37,6 +40,10 @@ struct RecapDetailView: View {
         .navigationTitle(recording?.displayTitle ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
+        .fullScreenCover(isPresented: $practising) {
+            ReviewSessionView(mode: .review, brainID: nil,
+                              recordingID: recordingID, limit: 12)
+        }
         // Enqueueing is all this screen does — the queue owns the work, so
         // walking back to the library no longer cancels it half-done.
         .onAppear {
@@ -139,6 +146,8 @@ struct RecapDetailView: View {
                 if let recap = rec.recap {
                     recapBody(rec, recap)
                 }
+
+                practiceCard(rec)
 
                 if !rec.segments.isEmpty { transcriptButton(rec) }
             }
@@ -368,6 +377,64 @@ struct RecapDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Practice
+    //
+    // Reading notes feels like learning and mostly isn't; the gap between
+    // recognising a page you've read and being able to produce it is where
+    // people lose exams. So the recap ends with the retrieval offer, at the
+    // point the material is freshest — not buried in a separate tab the reader
+    // has to think to visit.
+
+    @ViewBuilder
+    private func practiceCard(_ rec: Recording) -> some View {
+        let items = study.items(forRecording: rec.id)
+        if !items.isEmpty {
+            let due = items.filter { $0.isNew || $0.memory.due <= Date() }.count
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    IconTile(symbol: "brain.head.profile", tint: .brand, size: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Practise this recap")
+                            .font(.subheadline.weight(.semibold))
+                        Text(practiceBlurb(total: items.count, due: due))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Button {
+                    Haptics.tap()
+                    practising = true
+                } label: {
+                    Label("Start", systemImage: "play.fill")
+                }
+                .buttonStyle(SoftButtonStyle(tint: .brand))
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
+                    .fill(Color.cardBG)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
+                            .strokeBorder(Color.hairline)
+                    }
+            }
+        }
+    }
+
+    private func practiceBlurb(total: Int, due: Int) -> String {
+        let questions = total == 1 ? "1 question" : "\(total) questions"
+        if due == 0 {
+            return "\(questions) from these notes. Nothing is due — the schedule will bring them back."
+        }
+        if due == total {
+            return "\(questions) from these notes, all waiting."
+        }
+        return "\(questions) from these notes · \(due) waiting."
     }
 
     // MARK: - Shared pieces

@@ -26,6 +26,10 @@ protocol StudyItemSink: AnyObject {
 @MainActor
 @Observable
 final class StudyStore: StudyItemSink {
+    /// One bank per process, for the same reason as `LibraryStore.shared`: a
+    /// recap can finish in a `BGProcessingTask` with no view tree anywhere, and
+    /// its questions have to be written by whoever finishes it.
+    static let shared = StudyStore()
 
     /// Includes tombstones; use the filtered accessors.
     private(set) var items: [StudyItem] = []
@@ -164,23 +168,28 @@ final class StudyStore: StudyItemSink {
     // (Brunmair & Richter 2019), so the queue round-robins across courses and
     // avoids putting two questions on the same concept back to back.
 
-    func queue(mode: StudyMode, brainID: UUID? = nil, limit: Int,
-               newLimit: Int = 12, at now: Date = .now) -> [StudyItem] {
+    /// `recordingID` narrows the queue to a single recap — what "practise this
+    /// lecture" means. It deliberately doesn't change the ordering rules: even
+    /// one recap's questions are still interleaved by concept.
+    func queue(mode: StudyMode, brainID: UUID? = nil, recordingID: UUID? = nil,
+               limit: Int, newLimit: Int = 12, at now: Date = .now) -> [StudyItem] {
+        let pool = activeItems.filter {
+            (brainID == nil || $0.brainID == brainID)
+                && (recordingID == nil || $0.recordingID == recordingID)
+        }
         switch mode {
         case .review:
-            return reviewQueue(brainID: brainID, limit: limit, newLimit: newLimit, now: now)
+            return reviewQueue(pool, limit: limit, newLimit: newLimit, now: now)
         case .flashcards:
-            return flashcardQueue(brainID: brainID, limit: limit, now: now)
+            return flashcardQueue(pool, limit: limit, now: now)
         case .practiceExam:
-            return examQueue(brainID: brainID, limit: limit)
+            return examQueue(pool, limit: limit)
         case .drill:
-            return drillQueue(brainID: brainID, limit: limit)
+            return drillQueue(pool, limit: limit)
         }
     }
 
-    private func reviewQueue(brainID: UUID?, limit: Int, newLimit: Int, now: Date) -> [StudyItem] {
-        let pool = activeItems.filter { brainID == nil || $0.brainID == brainID }
-
+    private func reviewQueue(_ pool: [StudyItem], limit: Int, newLimit: Int, now: Date) -> [StudyItem] {
         // Overdue first, most overdue leading — those are the ones actually
         // decaying. Within that, oldest due date wins.
         let due = pool
@@ -198,10 +207,9 @@ final class StudyStore: StudyItemSink {
         return interleave(Array(due) + Array(fresh), limit: limit)
     }
 
-    private func flashcardQueue(brainID: UUID?, limit: Int, now: Date) -> [StudyItem] {
-        let pool = activeItems.filter {
-            (brainID == nil || $0.brainID == brainID) && $0.kind != .choice
-        }
+    private func flashcardQueue(_ everything: [StudyItem], limit: Int, now: Date) -> [StudyItem] {
+        // Multiple choice has nothing to flip.
+        let pool = everything.filter { $0.kind != .choice }
         // Due work first so flipping cards still advances the schedule, then
         // whatever is closest to falling below the retention target.
         let ordered = pool.sorted { a, b in
@@ -213,8 +221,7 @@ final class StudyStore: StudyItemSink {
         return interleave(ordered, limit: limit)
     }
 
-    private func examQueue(brainID: UUID?, limit: Int) -> [StudyItem] {
-        let pool = activeItems.filter { brainID == nil || $0.brainID == brainID }
+    private func examQueue(_ pool: [StudyItem], limit: Int) -> [StudyItem] {
         guard !pool.isEmpty else { return [] }
 
         // A practice exam should look like an exam: a spread of question types,
@@ -228,10 +235,9 @@ final class StudyStore: StudyItemSink {
         return interleave(Array(focus).shuffled() + Array(rest), limit: limit)
     }
 
-    private func drillQueue(brainID: UUID?, limit: Int) -> [StudyItem] {
+    private func drillQueue(_ everything: [StudyItem], limit: Int) -> [StudyItem] {
         let weak = weaknessScores()
-        let pool = activeItems
-            .filter { brainID == nil || $0.brainID == brainID }
+        let pool = everything
             .filter { (weak[$0.concept] ?? 0) > 0 }
             .sorted { (weak[$0.concept] ?? 0) > (weak[$1.concept] ?? 0) }
         return interleave(pool, limit: limit)
@@ -482,6 +488,44 @@ final class StudyStore: StudyItemSink {
         }
         add(minted)
         return minted.count
+    }
+
+    /// Rebuilds one recap's questions against the notes it has *now*.
+    ///
+    /// Called when the processing queue finishes a recording — first pass or a
+    /// rewrite. A rewrite replaces the notes wholesale, so questions minted from
+    /// the old text can be about something the recap no longer says; those are
+    /// dropped. Anything the user has actually answered is kept, schedule and
+    /// all: throwing away review history to tidy up a question bank is the one
+    /// thing spaced repetition can't recover from, and a stale question you've
+    /// seen twice is a smaller cost than resetting its interval to zero.
+    /// `library` is only there to give multiple-choice somewhere to find
+    /// plausible distractors — sibling terms from the same course.
+    @discardableResult
+    func refreshItems(for recording: Recording, in library: [Recording]) -> Int {
+        guard recording.isProcessed else { return 0 }
+
+        var dropped = false
+        for i in items.indices
+        where items[i].recordingID == recording.id
+            && !items[i].deleted
+            && items[i].memory.reps == 0 {
+            items[i].deleted = true
+            items[i].updatedAt = Date()
+            dropped = true
+        }
+        if dropped { saveItems() }
+
+        var minted = QuestionMint.items(for: recording)
+        let siblings = library.filter { $0.brainID == recording.brainID && $0.isProcessed }
+        if siblings.count > 1 {
+            minted += QuestionMint.choiceItems(from: siblings, limit: 8 * siblings.count)
+        }
+        // `add` drops anything whose concept is already live, so a rewrite that
+        // says the same thing about a term you've studied changes nothing.
+        let before = liveItems.count
+        add(minted)
+        return liveItems.count - before
     }
 
     /// Adds the model-written application questions on top. Safe to call

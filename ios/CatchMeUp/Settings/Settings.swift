@@ -128,6 +128,11 @@ final class AppSettings {
     /// Focus-session lengths, in minutes.
     var focusMinutes: Int { didSet { d.set(focusMinutes, forKey: "focusMinutes") } }
     var breakMinutes: Int { didSet { d.set(breakMinutes, forKey: "breakMinutes") } }
+    /// A daily nudge on the days the schedule actually asks for one. On by
+    /// default because a review you're never reminded of is a review you don't
+    /// do, and the reminder stays silent when nothing is due.
+    var reviewReminder: Bool { didSet { d.set(reviewReminder, forKey: "reviewReminder") } }
+    var reviewReminderHour: Int { didSet { d.set(reviewReminderHour, forKey: "reviewReminderHour") } }
 
     /// Kept in the Keychain, not UserDefaults.
     var apiKey: String {
@@ -162,6 +167,8 @@ final class AppSettings {
         modelGrading = dd.object(forKey: "modelGrading") as? Bool ?? true
         focusMinutes = dd.object(forKey: "focusMinutes") as? Int ?? 25
         breakMinutes = dd.object(forKey: "breakMinutes") as? Int ?? 5
+        reviewReminder = dd.object(forKey: "reviewReminder") as? Bool ?? true
+        reviewReminderHour = dd.object(forKey: "reviewReminderHour") as? Int ?? 18
         apiKey = Keychain.get("apiKey") ?? ""
     }
 

@@ -28,6 +28,16 @@ enum CatchMeUpLink {
         URL(string: "\(scheme)://record?mode=\(mode.rawValue)")!
     }
 
+    /// Opens the Study tab. `brain` scopes it to one course, which is what a
+    /// reminder about a single course's backlog should land on.
+    static func study(brain: UUID? = nil) -> URL {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "study"
+        if let brain { components.queryItems = [.init(name: "brain", value: brain.uuidString)] }
+        return components.url!
+    }
+
     static func search(_ query: String = "") -> URL {
         var components = URLComponents()
         components.scheme = scheme
@@ -51,6 +61,9 @@ final class AppRouter {
     var libraryQuery = ""
     var recorderMode: Mode?
     var recorderBrainID: UUID?
+    /// Set by a `catchmeup://study?brain=` link; the Study tab picks it up once
+    /// and clears it, so a later manual filter change isn't fought over.
+    var studyBrainID: UUID?
 
     func open(_ url: URL) {
         guard url.scheme?.lowercased() == CatchMeUpLink.scheme else { return }
@@ -75,6 +88,11 @@ final class AppRouter {
             let rawMode = components?.queryItems?.first(where: { $0.name == "mode" })?.value
             recorderMode = Mode(rawValue: rawMode ?? "") ?? .meeting
             recorderBrainID = nil
+        case "study":
+            selectedTab = .study
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let rawBrain = components?.queryItems?.first(where: { $0.name == "brain" })?.value
+            studyBrainID = rawBrain.flatMap(UUID.init(uuidString:))
         case "search":
             selectedTab = .library
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false)

@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(LibraryStore.self) private var store
+    @Environment(StudyStore.self) private var study
 
     var body: some View {
         @Bindable var settings = settings
@@ -247,6 +248,29 @@ struct SettingsView: View {
         }
 
         Section {
+            Toggle(isOn: $settings.reviewReminder) {
+                Label("Daily reminder", systemImage: "bell.badge")
+            }
+            if settings.reviewReminder {
+                Picker(selection: $settings.reviewReminderHour) {
+                    ForEach(reminderHours, id: \.self) { Text(hourLabel($0)).tag($0) }
+                } label: {
+                    Label("Remind me at", systemImage: "clock")
+                }
+                .pickerStyle(.menu)
+            }
+        } footer: {
+            Text(reminderFooter)
+        }
+        .onChange(of: settings.reviewReminder) { _, on in
+            on ? StudyNotifier.reschedule(study: study, settings: settings)
+               : StudyNotifier.cancelAll()
+        }
+        .onChange(of: settings.reviewReminderHour) { _, _ in
+            StudyNotifier.reschedule(study: study, settings: settings)
+        }
+
+        Section {
             Toggle(isOn: $settings.modelGrading) {
                 Label("Check answers with the model", systemImage: "text.magnifyingglass")
             }
@@ -275,6 +299,28 @@ struct SettingsView: View {
         } footer: {
             Text("The break isn't padding — stopping is when what you just retrieved settles.")
         }
+    }
+
+    /// Late morning through evening. Nobody wants a 3am review prompt, and the
+    /// hours nobody would pick only make the menu longer.
+    private var reminderHours: [Int] { Array(7...22) }
+
+    private func hourLabel(_ hour: Int) -> String {
+        var components = DateComponents()
+        components.hour = hour
+        let date = Calendar.current.date(from: components) ?? Date()
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+
+    private var reminderFooter: String {
+        guard settings.reviewReminder else {
+            return "Nothing will remind you when reviews come due. The schedule keeps running either way — you just have to remember to open the app."
+        }
+        let due = study.todayCount(newLimit: settings.dailyNewLimit)
+        let tail = due > 0
+            ? "Right now that's \(due) waiting."
+            : "Nothing is due right now, so there'd be no reminder today."
+        return "Only on the days the schedule actually has work for you — quiet otherwise, which is what keeps it worth reading. \(tail)"
     }
 
     private var retentionText: String {

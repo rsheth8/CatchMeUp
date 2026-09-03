@@ -11,6 +11,8 @@ struct StudyView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(StudyStore.self) private var study
     @Environment(AppSettings.self) private var settings
+    @Environment(AppRouter.self) private var router
+    @Environment(ProcessingQueue.self) private var queue
 
     @State private var session: SessionRequest?
     @State private var showPlanner = false
@@ -65,6 +67,13 @@ struct StudyView: View {
             }
             .task { await prepare() }
             .refreshable { await prepare() }
+            // Taken once and cleared, so a link that scoped the tab to one
+            // course doesn't keep re-applying itself over a manual choice.
+            .onChange(of: router.studyBrainID) { _, id in
+                guard let id else { return }
+                pickedBrain = id
+                router.studyBrainID = nil
+            }
             .fullScreenCover(item: $session) { request in
                 ReviewSessionView(mode: request.mode, brainID: request.brainID, limit: request.limit)
             }
@@ -370,12 +379,25 @@ struct StudyView: View {
 
     // MARK: Empty
 
+    /// An empty Study tab means one of two very different things — nothing to
+    /// study, or notes still being written — and telling someone to "record a
+    /// lecture" while their lecture is mid-transcription is the kind of wrong
+    /// that makes an app feel broken.
+    @ViewBuilder
     private var emptyState: some View {
-        EmptyState(symbol: "graduationcap",
-                   title: "No questions yet",
-                   message: "Record or import a lecture. CatchMeUp writes the notes, then turns them into questions and schedules them for you.",
-                   tint: .brand)
-        .padding(.top, 40)
+        if let working = queue.summary {
+            EmptyState(symbol: "hourglass",
+                       title: "Writing the notes",
+                       message: "\(working). Questions are minted the moment a recap lands — this tab fills itself.",
+                       tint: .brand)
+            .padding(.top, 40)
+        } else {
+            EmptyState(symbol: "graduationcap",
+                       title: "No questions yet",
+                       message: "Record or import a lecture. CatchMeUp writes the notes, then turns them into questions and schedules them for you.",
+                       tint: .brand)
+            .padding(.top, 40)
+        }
     }
 
     // MARK: Work

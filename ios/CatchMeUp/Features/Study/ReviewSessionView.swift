@@ -17,6 +17,8 @@ import SwiftUI
 struct ReviewSessionView: View {
     let mode: StudyMode
     let brainID: UUID?
+    /// Set when a session was started from one recap, to practise just that.
+    var recordingID: UUID? = nil
     var limit: Int = 20
 
     @Environment(LibraryStore.self) private var store
@@ -446,8 +448,8 @@ struct ReviewSessionView: View {
     private func build() {
         guard queue.isEmpty else { return }
         study.mintOffline(for: store.sortedRecordings)
-        queue = study.queue(mode: mode, brainID: brainID, limit: limit,
-                            newLimit: settings.dailyNewLimit)
+        queue = study.queue(mode: mode, brainID: brainID, recordingID: recordingID,
+                            limit: limit, newLimit: settings.dailyNewLimit)
         startedAt = Date()
     }
 

@@ -137,6 +137,7 @@ final class ProcessingQueue {
 
     private var store: LibraryStore { LibraryStore.shared }
     private var settings: AppSettings { AppSettings.shared }
+    private var study: StudyStore { StudyStore.shared }
 
     private init() {}
 
@@ -518,6 +519,12 @@ final class ProcessingQueue {
             job.etaSeconds = 0
             job.title = recording.displayTitle
         }
+        // Questions get written in the same breath as the notes. Minting only at
+        // launch meant a recap you recorded and read this afternoon had nothing
+        // to study until you next cold-started the app — long enough that the
+        // material was no longer fresh, which is the whole point.
+        study.refreshItems(for: recording, in: store.sortedRecordings)
+        StudyNotifier.reschedule(study: study, settings: settings)
         Task { await liveActivity.finish(success: true) }
 
         if UIApplication.shared.applicationState != .active {

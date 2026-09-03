@@ -14,7 +14,7 @@ struct CatchMeUpApp: App {
     @State private var queue = ProcessingQueue.shared
     /// The question bank and schedule. Separate from `LibraryStore` because it
     /// outlives any one recap and syncs on its own files.
-    @State private var study = StudyStore()
+    @State private var study = StudyStore.shared
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -36,6 +36,11 @@ struct CatchMeUpApp: App {
                     // for when the user doesn't return for a while.
                     if phase == .active {
                         Task { await queue.resumeUnfinishedWork() }
+                    } else {
+                        // Leaving is the right moment to rewrite the week of
+                        // reminders: whatever the user just studied is already
+                        // recorded, so the numbers are current.
+                        StudyNotifier.reschedule(study: study, settings: settings)
                     }
                 }
         }
@@ -63,6 +68,7 @@ struct CatchMeUpApp: App {
         // so the Study tab's badge is right on the first frame the user sees.
         study.mergeFromDisk()
         study.mintOffline(for: store.sortedRecordings)
+        StudyNotifier.reschedule(study: study, settings: settings)
         if settings.audioRetention.isAutomatic {
             store.applyRetention(settings.audioRetention,
                                  allowLocalDeletion: settings.allowLocalAudioDeletion)

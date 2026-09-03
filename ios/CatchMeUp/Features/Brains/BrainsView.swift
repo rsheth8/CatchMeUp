@@ -174,6 +174,7 @@ struct BrainDetailView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(ProcessingQueue.self) private var queue
     @Environment(AppRouter.self) private var router
+    @Environment(StudyStore.self) private var study
 
     @State private var question = ""
     @State private var thread: [QAExchange] = []
@@ -182,7 +183,6 @@ struct BrainDetailView: View {
     @State private var showPersona = false
     @State private var personaDraft = ""
     @State private var showGraph = false
-    @State private var showExam = false
     @State private var showClip = false
 
     struct QAExchange: Identifiable, Equatable {
@@ -247,10 +247,10 @@ struct BrainDetailView: View {
                     Button { personaDraft = brain?.persona ?? ""; showPersona = true } label: {
                         Label("Edit persona", systemImage: "theatermasks")
                     }
-                    Button { showExam = true } label: {
-                        Label("Practice exam", systemImage: "graduationcap")
+                    Button { openStudy() } label: {
+                        Label("Study this brain", systemImage: "graduationcap")
                     }
-                    .disabled(store.recordings(inBrain: brainID).allSatisfy { $0.recap == nil })
+                    .disabled(study.items(inBrain: brainID).isEmpty)
                     Button { showClip = true } label: {
                         Label("Hear a concept", systemImage: "waveform")
                     }
@@ -268,10 +268,6 @@ struct BrainDetailView: View {
             if let brain {
                 BrainGraphScreen(brain: brain, recordings: store.recordings(inBrain: brainID))
             }
-        }
-        .sheet(isPresented: $showExam) {
-            ExamView(recordings: store.recordings(inBrain: brainID),
-                     accent: accent, brainName: brain?.name ?? "this brain")
         }
         .sheet(isPresented: $showClip) {
             ClipSheet(recordings: store.recordings(inBrain: brainID), accent: accent)
@@ -365,15 +361,31 @@ struct BrainDetailView: View {
 
     private func studyTools(_ brain: Brain) -> some View {
         let recs = store.recordings(inBrain: brainID)
-        let canExam = recs.contains { $0.recap != nil }
+        let questions = study.items(inBrain: brainID).count
         return HStack(spacing: 10) {
-            studyTool(symbol: "graduationcap", title: "Exam",
-                      subtitle: canExam ? "From these lectures" : "Needs recaps",
-                      enabled: canExam) { showExam = true }
+            // A shortcut, not a second engine: there is one question bank and one
+            // schedule, and both live in the Study tab. A brain-local exam that
+            // forgot what you got wrong would quietly undo the scheduling — so
+            // this hands the brain over to the tab that remembers.
+            studyTool(symbol: "graduationcap", title: "Study",
+                      subtitle: studySubtitle(questions: questions),
+                      enabled: questions > 0) { openStudy() }
             studyTool(symbol: "waveform", title: "Clip",
                       subtitle: recs.isEmpty ? "Needs recaps" : "Jump to the audio",
                       enabled: !recs.isEmpty) { showClip = true }
         }
+    }
+
+    private func studySubtitle(questions: Int) -> String {
+        guard questions > 0 else { return "Needs recaps" }
+        let due = study.todayCount(brainID: brainID, newLimit: settings.dailyNewLimit)
+        return due > 0 ? "\(due) waiting" : "\(questions) questions"
+    }
+
+    /// Scoped through the same deep link a reminder uses, so the tab lands
+    /// filtered to this brain by exactly one code path.
+    private func openStudy() {
+        router.open(CatchMeUpLink.study(brain: brainID))
     }
 
     private func studyTool(symbol: String, title: String, subtitle: String,

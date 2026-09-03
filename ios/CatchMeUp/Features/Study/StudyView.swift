@@ -67,13 +67,12 @@ struct StudyView: View {
             }
             .task { await prepare() }
             .refreshable { await prepare() }
-            // Taken once and cleared, so a link that scoped the tab to one
-            // course doesn't keep re-applying itself over a manual choice.
-            .onChange(of: router.studyBrainID) { _, id in
-                guard let id else { return }
-                pickedBrain = id
-                router.studyBrainID = nil
-            }
+            // Both, deliberately. A tab the user has already visited is live and
+            // sees `onChange`; a tab opened for the first time by the link
+            // doesn't exist yet when the value is set, so it has to read it on
+            // appear instead.
+            .onAppear { consumeRoute() }
+            .onChange(of: router.studyBrainID) { _, _ in consumeRoute() }
             .fullScreenCover(item: $session) { request in
                 ReviewSessionView(mode: request.mode, brainID: request.brainID, limit: request.limit)
             }
@@ -401,6 +400,14 @@ struct StudyView: View {
     }
 
     // MARK: Work
+
+    /// Applies a `catchmeup://study?brain=` scope, then clears it so a manual
+    /// filter change afterwards isn't fought over.
+    private func consumeRoute() {
+        guard let id = router.studyBrainID else { return }
+        pickedBrain = id
+        router.studyBrainID = nil
+    }
 
     private func prepare() async {
         study.mintOffline(for: store.sortedRecordings)

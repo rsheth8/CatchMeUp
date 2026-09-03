@@ -48,6 +48,79 @@ Long lectures are split on timestamps, recapped in passes, then merged. Bring yo
 
 The command is `./catchup`. The iPhone app is in [`ios/`](ios/README.md).
 
+## A workspace for school and work
+
+Start with `./catchup today` for a local overview of courses, work projects, and open follow-ups.
+Use `./catchup today --audience student` or `--audience work` to focus the view.
+
+### Students
+
+```bash
+./catchup brain new "Biology 101" --lecture
+./catchup materials biology-101 add ~/Downloads/week1.pdf
+./catchup into biology-101 ~/Downloads/lecture1.m4a
+./catchup review biology-101                         # local checklist + key terms
+./catchup ask biology-101 "Explain mitochondria" --closed
+./catchup exam biology-101 --print
+./catchup drill biology-101
+```
+
+`review` summarizes the latest three saved recaps without a model call. Existing exams and drills
+still use recorded lecture content; document context is available in `ask`, `think`, and `grade`.
+
+### Work and meetings
+
+```bash
+./catchup brain new "Product team" --meeting
+./catchup materials product-team add ~/Downloads/agenda.pdf ~/Downloads/proposal.pptx
+./catchup into product-team ~/Downloads/standup.m4a
+./catchup prepare product-team                     # recent recaps, outcomes, open tasks
+./catchup tasks product-team                       # IDs + owner/date/status/evidence
+./catchup tasks product-team review TASK_ID --owner "Jordan" --due 2026-10-01
+./catchup tasks product-team start TASK_ID
+./catchup tasks product-team done TASK_ID
+./catchup tasks product-team --all --json           # includes completed follow-ups
+```
+
+Replace `TASK_ID` with the displayed eight-character ID. `open` reopens a task;
+`edit ID --owner NAME --due YYYY-MM-DD` changes details, and `--due none` clears a date.
+Legacy action items are unreviewed suggestions: owners and calendar dates are not guessed.
+`review` explicitly confirms a task; completing one does not silently mark it reviewed.
+Phone-created meeting agendas, outcomes, evidence, and reminder links survive sync and CLI edits.
+`prepare` shows existing outcomes; it does not invent or extract new decisions. Nothing here sends
+emails, creates calendar events, or exports reminders automatically.
+
+### Supporting materials
+
+```bash
+./catchup materials product-team                   # list IDs
+./catchup materials product-team show MATERIAL_ID
+./catchup materials product-team search pricing
+./catchup materials product-team add proposal.pdf --recap "Billing sync"
+```
+
+Both course and meeting brains accept **PDF, PPTX, UTF-8 TXT, and Markdown**. `--recap` must match
+one recap title or folder ID; otherwise import refuses to guess. Reimporting the same contents
+does not create another copy. Originals and a page/slide/line-addressed text index live under
+`brains/NAME/materials/`. Sources are searchable immediately, even before the first recording.
+Q&A citations distinguish these documents from things actually said in recordings.
+
+This is text extraction, not full visual understanding: scanned pages need OCR first; diagrams,
+charts, handwriting, slide speaker notes, and animations are not interpreted. Image-only imports
+are rejected with guidance; partially readable files show a warning. Limits are 50 MB per file,
+300 PDF pages/slides, and two million extracted characters. Export Keynote or older PowerPoint
+formats to PDF/PPTX first. Run `./catchup setup` to install the new PDF dependency on an existing install.
+
+**Privacy and sync:** Import, material search, `today`, `prepare`, `review`, and task edits work
+locally without iCloud or an API key. AI commands may send retrieved text to your configured model
+provider; choose your existing local-provider setup if the text must stay on-device. Materials
+do **not** yet sync to iPhone and do not retroactively regenerate recaps, exams, or the concept graph.
+Task edits are saved locally; use `./catchup sync pull` before editing and `./catchup sync push`
+afterwards if sharing with the phone. Sync keeps the newest whole recording, not per-field merges;
+avoid editing the same meeting independently on both devices. Back up your local data folder.
+
+Use `./catchup help materials`, `help tasks`, or `help today` for command options.
+
 ---
 
 ## Two surfaces, one library
@@ -61,7 +134,8 @@ The command is `./catchup`. The iPhone app is in [`ios/`](ios/README.md).
 | For | A week of files, folders, watch folders | Record in class, replay on the train |
 | Transcribe | WhisperKit (on-device) | Apple Speech (on-device) |
 | Recap | Your cloud LLM or Ollama | Demo / your key / Apple on-device |
-| After | `exam`, `clip`, `think`, `cortex`, `sync` | Exam, Clip, Ask, player, iCloud |
+| Organize | `today`, `review`, `prepare`, `tasks`, `materials` | Materials, meeting workspace, follow-ups |
+| Explore | `ask`, `exam`, `clip`, `think`, `cortex`, `sync` | Exam, Clip, Ask, player, iCloud |
 
 ```bash
 ./catchup lecture ~/Downloads/week3.mp4
@@ -105,6 +179,20 @@ Then pick a provider and a default style:
 
 `./catchup doctor` is the send-this-to-a-friend check. If it is green, they are ready.
 
+### Updating an existing install
+
+After saving any local code changes, update the project and its Python dependencies:
+
+```bash
+git pull --ff-only
+./venv/bin/python3 -m pip install -e .
+./catchup today
+```
+
+This installs the new `pypdf` dependency without rerunning the full recording setup.
+The local workspace commands do not need an API key; transcription and AI commands
+still require their respective tools/provider configuration.
+
 ---
 
 ## Everyday use
@@ -144,7 +232,9 @@ Generic RAG over “all my PDFs” is everywhere. CatchMeUp’s wedge is a **nam
 | `brains/acme-client/` | Account memory | “What did we promise them about billing?” |
 | `brains/standups/` | Team historian | “Who owns the auth migration?” |
 
-Each brain has a persona, an inbox, and a recap corpus the search cannot leave. Ask it from the terminal or from the iOS app.
+Each brain has a persona, an inbox, and its own recaps and supporting materials. Brain-scoped
+Q&A searches only that brain's sources. Ask from the terminal or the iOS app; supporting
+material files currently stay on the device where you import them.
 
 ```bash
 ./catchup brain new cs61a --lecture
@@ -248,6 +338,26 @@ Run `./catchup` or `./catchup help` for the full list.
 </details>
 
 <details>
+<summary><strong>Student & work workspace</strong></summary>
+
+| Command | What it does |
+|---|---|
+| `./catchup today --audience student\|work` | Focus the local workspace overview |
+| `./catchup review NAME` | Review recent lecture summaries, terms, and study prompts |
+| `./catchup prepare NAME` | Prepare from saved meetings, outcomes, and open follow-ups |
+| `./catchup tasks NAME` | Show open follow-ups with IDs and review status |
+| `./catchup tasks NAME review ID --owner NAME --due YYYY-MM-DD` | Confirm a follow-up and its details |
+| `./catchup tasks NAME start\|done\|open ID` | Track progress or reopen a task |
+| `./catchup tasks NAME --all --json` | Export task data to standard output |
+| `./catchup materials NAME add FILE` | Import a PDF, PPTX, TXT, or Markdown file locally |
+| `./catchup materials NAME add FILE --recap TITLE` | Attach material to one matching recap |
+| `./catchup materials NAME` | List the brain's supporting materials |
+| `./catchup materials NAME show ID` | Read extracted text with source locations |
+| `./catchup materials NAME search WORDS` | Search material text without a model call |
+
+</details>
+
+<details>
 <summary><strong>Library & Mac ↔ iPhone</strong></summary>
 
 | Command | What it does |
@@ -255,7 +365,7 @@ Run `./catchup` or `./catchup help` for the full list.
 | `./catchup search WORDS` | Find a topic across meetings + lectures |
 | `./catchup ask QUESTION` | Ask your library |
 | `./catchup quiz` | Flashcards from lecture terms |
-| `./catchup todos` | Action items from all meetings |
+| `./catchup todos` | Open follow-ups from all meetings, respecting saved completion |
 | `./catchup moments` | Timestamps from the latest recap |
 | `./catchup play HH:MM:SS` | Play 25s of that moment |
 | `./catchup sync` | What the Mac and the iPhone each hold |
@@ -345,6 +455,7 @@ recordings/       drop files here
 output/           finished Word notes
 processed/        originals + mp3 + transcript, archived per run
 brains/           specialist agents (gitignored except README)
+brains/NAME/materials/  local originals + page/slide/line text indexes
 ios/              SwiftUI app
 docs/             logo + README art
 logs/             pipeline.log
@@ -367,6 +478,9 @@ Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 | Notes feel like a meeting but it was class | `./catchup lecture FILE` (or `./catchup mode lecture`) |
 | Notes feel like a lecture but it was work | `./catchup meeting FILE` |
 | File sits in `recordings/` | Size must be stable (still copying). Then `./catchup status` |
+| PDF support needs an update | `./venv/bin/python3 -m pip install -e .` |
+| Material has no readable text | Run OCR or export a text-based PDF; image-only content is not indexed |
+| Material is not appearing on iPhone | Material-file sync is not implemented yet; import it on that device |
 
 Full traceback lives in `logs/pipeline.log`.
 
@@ -377,10 +491,13 @@ Full traceback lives in `logs/pipeline.log`.
 Recaps, brains, and cortex honor `CATCHMEUP_HOME`, so the suite uses a temp directory and never writes into your real library.
 
 ```bash
-python3 -m unittest discover -s tests -v
+./venv/bin/python3 -m unittest discover -s tests -v
 ```
 
-That covers brains, cortex, chunking, search, the graph, and the CLI. It does **not** call ffmpeg, whisperkit-cli, or a live LLM.
+That covers brains, cortex, chunking, search, the graph, CLI workflows, material extraction,
+follow-up edits, and meeting sync round trips/conflict handling. AI responses are mocked;
+the suite does **not** call WhisperKit or a live LLM. If ffmpeg is installed, a smoke test
+uses it to convert a short generated tone. All test data stays in temporary directories.
 
 iOS unit tests:
 

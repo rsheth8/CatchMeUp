@@ -542,7 +542,7 @@ def activate(slug: str, query: str, hops: int = 2, top: int = 12) -> list[dict]:
 
 
 def _pack_activated(slug: str, question: str, fired: list[dict]) -> str:
-    records = list(brains.iter_brain_records(slug))
+    records = brains.evidence_records(slug)
     # Prefer recaps whose titles show up on fired concepts.
     episode_hits = []
     for node in fired:
@@ -574,7 +574,7 @@ def _pack_activated(slug: str, question: str, fired: list[dict]) -> str:
 def think(slug: str, question: str, log=print, closed: bool | None = None) -> str:
     """Multi-pass analysis: decompose → activate → evidence → critique → synthesize."""
     brain = brains.load_brain(slug)
-    records = list(brains.iter_brain_records(slug))
+    records = brains.evidence_records(slug)
     if not records:
         return (
             f"Brain `{slug}` has no recaps yet. "

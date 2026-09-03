@@ -137,6 +137,13 @@ def parse_iso(value: Any) -> datetime:
     return parsed
 
 
+def cli_update_time(metadata: dict[str, Any]) -> datetime:
+    """Legacy processed_at is local time; phone stamps have an explicit offset."""
+    values = [parse_iso(iso_date(metadata[key])) for key in ("processed_at", "ios_updated_at")
+              if metadata.get(key)]
+    return max(values, default=datetime.min.replace(tzinfo=timezone.utc))
+
+
 def local_stamp(value: Any) -> str:
     """ISO instant -> the `%Y-%m-%d %H:%M` the CLI records use."""
     moment = parse_iso(value)
@@ -374,6 +381,8 @@ def convert_recording(
         metadata.get("recorded_at") or metadata.get("processed_at"), fallback_date
     )
     updated_at = iso_date(metadata.get("processed_at"), fallback_date)
+    if metadata.get("ios_updated_at"):
+        updated_at = max(updated_at, iso_date(metadata["ios_updated_at"]), key=parse_iso)
     segments, duration = load_segments(folder, metadata, relative)
 
     audio_filename: str | None = None
@@ -396,7 +405,7 @@ def convert_recording(
         or metadata.get("title")
         or Path(str(metadata.get("source") or "Recap")).stem
     )
-    return {
+    result = {
         "id": recording_id,
         "title": str(title),
         "createdAt": created_at,
@@ -408,8 +417,14 @@ def convert_recording(
         "segments": segments,
         "recap": recap,
         "brainID": brain_ids.get(str(brain_slug)) if brain_slug else None,
-        "completedActions": [],
+        "completedActions": metadata.get("completedActions", []),
     }
+    if isinstance(metadata.get("meeting"), dict):
+        result["meeting"] = metadata["meeting"]
+    for field in USER_STATE_FIELDS:
+        if field in metadata:
+            result[field] = metadata[field]
+    return result
 
 
 # ----------------------------------------------------------------- the merge
@@ -449,6 +464,10 @@ def merge_by_id(
             continue
         winner = dict(item)
         if carry_user_state:
+            # Older CLI recaps lack workspaces. Never erase phone meeting work
+            # merely because its transcript was regenerated more recently.
+            if "meeting" not in winner and "meeting" in current:
+                winner["meeting"] = current["meeting"]
             for field in USER_STATE_FIELDS:
                 if field in current:
                     winner[field] = current[field]
@@ -503,7 +522,7 @@ def cli_record_from_recording(
     recording: dict[str, Any], brain_slug: str | None
 ) -> dict[str, Any]:
     title = str(recording.get("title") or "Recording")
-    return {
+    result = {
         "version": 1,
         "mode": "lecture" if recording.get("mode") == "lecture" else "meeting",
         "brain": brain_slug,
@@ -516,6 +535,12 @@ def cli_record_from_recording(
         "ios_id": normalize_id(recording.get("id")),
         "ios_updated_at": iso_date(recording.get("updatedAt")),
     }
+    if isinstance(recording.get("meeting"), dict):
+        result["meeting"] = recording["meeting"]
+    for field in USER_STATE_FIELDS:
+        if field in recording:
+            result[field] = recording[field]
+    return result
 
 
 def existing_ios_ids(slug: str) -> dict[str, Path]:
@@ -723,9 +748,7 @@ def pull(
             already = seen_processed.get(ios_id)
             if already is not None:
                 current = read_json(already, {})
-                if parse_iso(record["ios_updated_at"]) <= parse_iso(
-                    current.get("ios_updated_at")
-                ):
+                if parse_iso(record["ios_updated_at"]) <= cli_update_time(current):
                     continue
                 if not dry_run:
                     merged = {**current, **record}
@@ -758,9 +781,7 @@ def pull(
         if already is not None:
             # Only rewrite when the phone actually moved on.
             current = read_json(already, {})
-            if parse_iso(record["ios_updated_at"]) <= parse_iso(
-                current.get("ios_updated_at")
-            ):
+            if parse_iso(record["ios_updated_at"]) <= cli_update_time(current):
                 continue
             record["source"] = current.get("source") or record["source"]
             if not dry_run:

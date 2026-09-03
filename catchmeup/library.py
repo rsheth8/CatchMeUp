@@ -186,8 +186,12 @@ def cmd_ask(question: str, mode: str | None, brain: str | None = None, closed: b
         ))
         return
     rows = list_records(mode)
+    from . import materials
+    for entry in brains_mod.list_brains():
+        if not mode or entry.get("kind") == mode:
+            rows.extend(materials.records(entry["slug"]))
     if not rows:
-        print("Nothing in the library yet. Recap a recording first.")
+        print("Nothing in the library yet. Recap a recording or add supporting materials first.")
         sys.exit(1)
     hits = brains_mod.retrieve(question, rows)
     closed = brains_mod.want_closed(closed)
@@ -275,14 +279,16 @@ def cmd_quiz(mode: str | None, count: int, brain: str | None = None):
 
 
 def cmd_todos(mode: str | None, brain: str | None = None):
+    from .workspace import followups, task_line
     rows = list_records(mode or "meeting", brain=brain)
     items = []
     for rec in rows:
         analysis = rec.get("analysis") or {}
         slug = rec.get("brain") or brain
         mapped = brains_mod.apply_speaker_map(slug, analysis) if slug else analysis
-        for item in mapped.get("action_items") or []:
-            items.append((rec.get("title") or rec.get("source"), rec.get("recorded_at"), str(item)))
+        for item in followups({**rec, "analysis": mapped}):
+            if item.get("status") != "done":
+                items.append((rec.get("title") or rec.get("source"), rec.get("recorded_at"), task_line(item)))
     if not items:
         print("No action items in the library yet. Recap a meeting: ./catchup meeting FILE")
         return

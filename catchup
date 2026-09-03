@@ -108,6 +108,17 @@ ${BOLD}Brains${RESET}  ${DIM}one specialist per subject or team${RESET}
   watch NAME            Watch that brain's inbox/
   mcp install           Let Cursor talk to your brains
 
+${BOLD}Study & work${RESET}  ${DIM}local-first, no API key needed${RESET}
+  today [--audience student|work]   Courses, projects, next steps
+  review NAME           Study checklist + key terms from recent lectures
+  prepare NAME          Meeting brief, open follow-ups, saved outcomes
+  tasks NAME            Follow-ups with owners, dates, review status
+  tasks NAME review ID --owner NAME --due YYYY-MM-DD
+  tasks NAME start|done|open ID     Track progress
+  materials NAME add FILE          PDF, PPTX, TXT, Markdown
+  materials NAME        List materials; show ID or search WORDS
+  materials NAME add FILE --recap TITLE   Attach to a specific recap
+
 ${BOLD}iPhone${RESET}  ${DIM}one library across the Mac and the app${RESET}
   sync                  What the Mac and the iPhone are each holding
   sync push             Send recaps to the iPhone
@@ -156,6 +167,9 @@ cmd_help() {
 help_topic() {
   local topic="$1"
   case "$topic" in
+    today|review|prepare|tasks|materials)
+      run_python -m catchmeup.workspace "$topic" --help
+      ;;
     setup)
       header "help · setup"
       cat <<EOF
@@ -553,7 +567,7 @@ cmd_setup() {
   info "Installing Python packages"
   "$PYTHON" -m pip install --upgrade pip >/dev/null
   "$PYTHON" -m pip install -e "$PROJECT_DIR"
-  ok "Python venv + anthropic + openai + python-docx"
+  ok "Python venv + AI providers + document/PDF support"
 
   ensure_dirs
   ok "Folders: recordings/  output/  processed/  logs/"
@@ -758,16 +772,16 @@ cmd_doctor() {
 
   if python_ok; then
     ok "venv       $PYTHON"
-    if "$PYTHON" -c "import anthropic, openai, docx" 2>/dev/null; then
-      ok "Python packages (anthropic, openai, python-docx)"
+    if "$PYTHON" -c "import anthropic, openai, docx, pypdf" 2>/dev/null; then
+      ok "Python packages (AI providers + document/PDF support)"
     else
       err "Python packages missing — run ./catchup setup"
       failed=1
     fi
   elif have python3; then
     warn "venv missing — using system python3 (run ./catchup setup for an isolated venv)"
-    if python3 -c "import anthropic, openai, docx" 2>/dev/null; then
-      ok "Python packages (anthropic, openai, python-docx)"
+    if python3 -c "import anthropic, openai, docx, pypdf" 2>/dev/null; then
+      ok "Python packages (AI providers + document/PDF support)"
     else
       err "Python packages missing — run ./catchup setup"
       failed=1
@@ -1871,6 +1885,7 @@ main() {
   shift || true
   case "$cmd" in
     help|-h|--help|commands|cmds) cmd_help "$@" ;;
+    today|review|prepare|tasks|materials) run_python -m catchmeup.workspace "$cmd" "$@" ;;
     setup) cmd_setup "$@" ;;
     doctor) cmd_doctor "$@" ;;
     config) cmd_config "$@" ;;

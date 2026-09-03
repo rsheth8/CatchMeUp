@@ -20,6 +20,25 @@ final class AudioRecorder: NSObject {
     private var timer: Timer?
     private(set) var fileURL: URL?
 
+    enum RecorderError: LocalizedError {
+        /// The hardware never came live inside `startTimeout`.
+        case micDidNotStart
+
+        var errorDescription: String? {
+            switch self {
+            case .micDidNotStart:
+                "The microphone didn't start. Another app may be using it."
+            }
+        }
+    }
+
+    /// How long the hardware gets before the app gives up on it. Starting a
+    /// recording is normally instant; the cases that aren't — another app
+    /// holding the input, a route that never answers — do not resolve by
+    /// waiting longer, and the old code waited for them forever behind a
+    /// spinner. Long enough that a Bluetooth mic can still negotiate.
+    nonisolated static let startTimeout: Duration = .seconds(8)
+
     func requestPermission() async -> Bool {
         await withCheckedContinuation { c in
             AVAudioApplication.requestRecordPermission { c.resume(returning: $0) }
@@ -48,8 +67,13 @@ final class AudioRecorder: NSObject {
             throw error
         }
 
-        // The user may have cancelled while the hardware was spinning up.
-        guard isRecording else { live.stop(); return }
+        // The user may have cancelled while the hardware was spinning up. The
+        // timer never ran, so there is nothing in the file worth keeping.
+        guard isRecording else {
+            live.stop()
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
         recorder = live
         isStarting = false
 
@@ -60,10 +84,28 @@ final class AudioRecorder: NSObject {
         timer = t
     }
 
+    /// Races the hardware against `startTimeout`. Every call in here can block
+    /// indefinitely — `setActive` and `record()` both go through the audio HAL —
+    /// and none of them is cancellable, so losing the race means abandoning the
+    /// work rather than stopping it: the caller gets its error immediately and
+    /// `StartRace` cleans up behind whatever arrives afterwards.
     private nonisolated static func begin(at url: URL,
                                           quality: AudioQuality) async throws -> AVAudioRecorder {
         try await withCheckedThrowingContinuation { continuation in
+            let race = StartRace(continuation) { orphan in
+                orphan.stop()
+                try? FileManager.default.removeItem(at: orphan.url)
+            }
+
+            // `try`, not `try?`: cancellation has to skip the settle, or
+            // stopping the clock would itself report a timeout.
+            let deadline = Task {
+                try await Task.sleep(for: startTimeout)
+                race.settle(.failure(RecorderError.micDidNotStart))
+            }
+
             DispatchQueue.global(qos: .userInitiated).async {
+                defer { deadline.cancel() }
                 do {
                     let session = AVAudioSession.sharedInstance()
                     try session.setCategory(.playAndRecord, mode: .default,
@@ -82,9 +124,9 @@ final class AudioRecorder: NSObject {
                     }
                     rec.isMeteringEnabled = true
                     rec.record()
-                    continuation.resume(returning: rec)
+                    race.settle(.success(rec))
                 } catch {
-                    continuation.resume(throwing: error)
+                    race.settle(.failure(error))
                 }
             }
         }
@@ -127,6 +169,38 @@ final class AudioRecorder: NSObject {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
         return fileURL
+    }
+}
+
+/// Hands the first of two racers to the caller and disposes of the loser.
+///
+/// Both halves matter. Resuming a `CheckedContinuation` twice is a crash, so the
+/// win has to be decided under a lock; and a recorder that arrives after the
+/// timeout is nobody's — nothing will ever stop it, so it would sit holding the
+/// input and writing a file the library never learns about. Handing it to
+/// `discard` is what makes abandoning a start safe.
+final class StartRace<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private let discard: @Sendable (Value) -> Void
+
+    init(_ continuation: CheckedContinuation<Value, Error>,
+         discard: @escaping @Sendable (Value) -> Void) {
+        self.continuation = continuation
+        self.discard = discard
+    }
+
+    func settle(_ result: Result<Value, Error>) {
+        lock.lock()
+        let waiting = continuation
+        continuation = nil
+        lock.unlock()
+
+        if let waiting {
+            waiting.resume(with: result)
+        } else if case .success(let orphan) = result {
+            discard(orphan)
+        }
     }
 }
 

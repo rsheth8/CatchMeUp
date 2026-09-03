@@ -12,6 +12,9 @@ struct RecordView: View {
     @State private var mode: Mode
     @State private var recorder = AudioRecorder()
     @State private var permissionDenied = false
+    /// Set when the mic refused to start, so the reason shows instead of a
+    /// spinner that never resolves. Cleared on the next attempt.
+    @State private var startError: String?
     @State private var didStart = false
     @State private var confirmDiscard = false
 
@@ -47,7 +50,12 @@ struct RecordView: View {
         .onDisappear { if recorder.isRecording { recorder.stop() } }
         .alert("Discard this recording?", isPresented: $confirmDiscard) {
             Button("Keep recording", role: .cancel) { }
-            Button("Discard", role: .destructive) { recorder.stop(); dismiss() }
+            // "The audio won't be saved" has to be true on disk as well as in
+            // the library — stopping alone left the file behind.
+            Button("Discard", role: .destructive) {
+                if let url = recorder.stop() { try? FileManager.default.removeItem(at: url) }
+                dismiss()
+            }
         } message: {
             Text("The audio won't be saved.")
         }
@@ -163,6 +171,8 @@ struct RecordView: View {
         Group {
             if permissionDenied {
                 Text("Microphone access is off. Turn it on in iOS Settings ▸ CatchMeUp.")
+            } else if let startError {
+                Text("\(startError) Tap to try again.")
             } else if recorder.isStarting {
                 Text("Starting the mic…")
             } else if recorder.isPaused {
@@ -174,10 +184,16 @@ struct RecordView: View {
             }
         }
         .font(.footnote)
-        .foregroundStyle(recorder.isPaused ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+        .foregroundStyle(statusTint)
         .multilineTextAlignment(.center)
         .padding(.horizontal, 40)
         .padding(.bottom, 18)
+    }
+
+    private var statusTint: AnyShapeStyle {
+        if permissionDenied || startError != nil { return AnyShapeStyle(Color.red) }
+        if recorder.isPaused { return AnyShapeStyle(Color.orange) }
+        return AnyShapeStyle(.secondary)
     }
 
     private var controls: some View {
@@ -237,10 +253,19 @@ struct RecordView: View {
             finish()
         } else {
             Haptics.tap(.medium)
+            startError = nil
             Task {
                 let url = store.audio.directory.appendingPathComponent(store.audio.newFilename())
-                do { try await recorder.start(to: url, quality: settings.recordingQuality) }
-                catch { permissionDenied = true }
+                do {
+                    try await recorder.start(to: url, quality: settings.recordingQuality)
+                } catch {
+                    // Whatever went wrong, say so. Blaming permissions here —
+                    // which is what this used to do — sends the user to a
+                    // Settings switch that is already on.
+                    Haptics.warning()
+                    startError = (error as? LocalizedError)?.errorDescription
+                        ?? "Couldn't start recording."
+                }
             }
         }
     }

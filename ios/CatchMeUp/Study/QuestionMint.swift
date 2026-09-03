@@ -403,15 +403,34 @@ enum QuestionMint {
 
     /// "Environment Diagrams" → "environment diagrams", but leaves acronyms and
     /// proper nouns alone.
+    ///
+    /// The lowering exists because the model title-cases terms it writes, so a
+    /// plain noun arrives as "Query" and would otherwise be asked about as
+    /// "What is a Query?". What has to survive is any word capitalised for a
+    /// reason of its own rather than by that habit — see `looksLikeName`.
     private static func lowercasedIfPlain(_ text: String) -> String {
-        guard !looksLikeCode(text), text != text.uppercased() else { return text }
+        guard !looksLikeCode(text), !looksLikeName(text) else { return text }
         let words = text.split(separator: " ")
         let titleCase = words.allSatisfy { $0.first?.isUppercase == true }
         return titleCase ? text.lowercased() : text
     }
 
+    /// A name rather than a noun: an acronym (HTTP), or anything carrying a
+    /// capital past its first letter — GraphQL, JavaScript, PostgreSQL, iOS.
+    /// Nothing reaches that shape by being title-cased, so an interior capital
+    /// is the lecture's own spelling and has to survive both the lowering and
+    /// the article. "What is a graphql?" is the sentence that makes a reader
+    /// stop trusting every question around it.
+    private static func looksLikeName(_ text: String) -> Bool {
+        if text == text.uppercased() { return true }
+        return text.split(separator: " ").contains {
+            $0.dropFirst().contains(where: \.isUppercase)
+        }
+    }
+
     static func withArticle(_ term: String) -> String {
         let t = lowercasedIfPlain(term)
+        guard !looksLikeName(t) else { return t }
         guard let first = t.first, first.isLetter, first.isLowercase else { return t }
         guard !isUncountable(t) else { return t }
         return ("aeiou".contains(first) ? "an " : "a ") + t

@@ -21,8 +21,66 @@ enum TranscriptionError: LocalizedError {
     }
 }
 
-/// On-device transcription with Apple's Speech framework. No network, no dependency.
-struct SpeechTranscriber: Transcriber {
+/// Picks the transcriber. There are two on-device engines rather than one
+/// because they were written for different jobs: `SFSpeechRecognizer` was built
+/// for dictation and is capped around a minute of live speech, while iOS 26's
+/// `SpeechAnalyzer` was built for exactly this — a long file, read end to end,
+/// with a time range on every phrase. A lecture is the second job, so the newer
+/// engine leads and the older one stays as the floor for iOS 17–25.
+enum Transcription {
+    static func engine(demo: Bool) -> Transcriber {
+        if demo { return MockTranscriber() }
+        if #available(iOS 26.0, *), AnalyzerTranscriber.isAvailable {
+            return AnalyzerTranscriber()
+        }
+        return RecognizerTranscriber()
+    }
+
+    /// Both engines gate on the same permission, so the prompt and the wording
+    /// the user sees don't depend on which one happened to be picked.
+    static func requestAuth() async throws {
+        let status = SFSpeechRecognizer.authorizationStatus()
+        if status == .authorized { return }
+        let granted: SFSpeechRecognizerAuthorizationStatus = await withCheckedContinuation { c in
+            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
+        }
+        guard granted == .authorized else { throw TranscriptionError.notAuthorized }
+    }
+
+    /// Groups phrase- or word-sized pieces into ~sentence chunks. Segments are
+    /// what the recap prompt, the transcript view and clip search all read, so
+    /// their size is a shared contract rather than an engine's detail.
+    static func assemble(_ pieces: [(start: Double, end: Double, text: String)]) -> [Segment] {
+        var out: [Segment] = []
+        var buffer = ""
+        var chunkStart: Double?
+        var lastEnd: Double = 0
+
+        for piece in pieces {
+            let text = piece.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            if chunkStart == nil { chunkStart = piece.start }
+            buffer += (buffer.isEmpty ? "" : " ") + text
+            lastEnd = piece.end
+
+            let endsSentence = text.range(of: #"[.!?]["')\]]?$"#, options: .regularExpression) != nil
+            let longEnough = (lastEnd - (chunkStart ?? 0)) > 18
+            if endsSentence || longEnough {
+                out.append(Segment(start: chunkStart ?? 0, text: buffer))
+                buffer = ""
+                chunkStart = nil
+            }
+        }
+        if !buffer.isEmpty {
+            out.append(Segment(start: chunkStart ?? 0, text: buffer))
+        }
+        return out
+    }
+}
+
+/// Dictation-era transcription with `SFSpeechRecognizer`. Still the engine on
+/// anything before iOS 26.
+struct RecognizerTranscriber: Transcriber {
     func transcribe(url: URL, progress: @escaping (Double) -> Void) async throws -> [Segment] {
         try await Self.requestAuth()
 
@@ -121,12 +179,7 @@ struct SpeechTranscriber: Transcriber {
     // MARK: helpers
 
     private static func requestAuth() async throws {
-        let status = SFSpeechRecognizer.authorizationStatus()
-        if status == .authorized { return }
-        let granted: SFSpeechRecognizerAuthorizationStatus = await withCheckedContinuation { c in
-            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
-        }
-        guard granted == .authorized else { throw TranscriptionError.notAuthorized }
+        try await Transcription.requestAuth()
     }
 
     private static func duration(of url: URL) async -> Double {
@@ -137,31 +190,15 @@ struct SpeechTranscriber: Transcriber {
         return 0
     }
 
-    /// Group word-level segments into ~sentence chunks so notes get usable timestamps.
+    /// Group word-level segments into ~sentence chunks so notes get usable
+    /// timestamps. The grouping itself is shared with the newer engine, so both
+    /// produce segments of the same size for everything downstream.
     private static func segments(from t: SFTranscription) -> [Segment] {
-        var out: [Segment] = []
-        var buffer = ""
-        var chunkStart: Double?
-        var lastEnd: Double = 0
-
-        for seg in t.segments {
-            if chunkStart == nil { chunkStart = seg.timestamp }
-            buffer += (buffer.isEmpty ? "" : " ") + seg.substring
-            lastEnd = seg.timestamp + seg.duration
-
-            let endsSentence = seg.substring.range(of: #"[.!?]$"#, options: .regularExpression) != nil
-            let longEnough = (lastEnd - (chunkStart ?? 0)) > 18
-            if endsSentence || longEnough {
-                out.append(Segment(start: chunkStart ?? 0, text: buffer.trimmingCharacters(in: .whitespaces)))
-                buffer = ""
-                chunkStart = nil
-            }
-        }
-        if !buffer.isEmpty {
-            out.append(Segment(start: chunkStart ?? 0, text: buffer.trimmingCharacters(in: .whitespaces)))
-        }
+        let out = Transcription.assemble(t.segments.map {
+            (start: $0.timestamp, end: $0.timestamp + $0.duration, text: $0.substring)
+        })
         if out.isEmpty, !t.formattedString.isEmpty {
-            out.append(Segment(start: 0, text: t.formattedString))
+            return [Segment(start: 0, text: t.formattedString)]
         }
         return out
     }

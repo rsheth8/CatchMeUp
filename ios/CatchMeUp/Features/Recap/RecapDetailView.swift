@@ -928,7 +928,9 @@ struct RecapDetailView: View {
     }
 
     /// Clears the recorded failure so the queue stops treating the recording as
-    /// something the user has already been told about.
+    /// something the user has already been told about. The queue picks up from
+    /// the furthest point that succeeded — a transcript that survived a failed
+    /// notes step is not thrown away and transcribed again.
     private func retryProcessing() {
         guard var rec = recording else { return }
         Haptics.tap()

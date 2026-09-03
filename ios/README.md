@@ -64,6 +64,27 @@ python3 ios/tools/load_cli_data.py --match "Program Efficiency, Part 2" --with-a
 Use `--replace` for a clean iOS library instead of a merge, or `--dry-run` to inspect the count
 without changing the Simulator.
 
+### Transcription does not run in the Simulator
+
+The Simulator ships no speech models, so this is the one step you cannot exercise there.
+Both engines claim to be present and neither works: `SFSpeechRecognizer` reports
+`isAvailable` and `supportsOnDeviceRecognition` as true and then fails with
+`kAFAssistantErrorDomain Code=1101`, and iOS 26's `SpeechAnalyzer` reports
+`SpeechTranscriber.isAvailable == false` with zero supported locales and
+`AssetInventory.status == .unsupported`. Both work on a real device. There is nothing
+to fix in the app — server-based recognition would transcribe fine here, but it would
+send the audio to Apple and break the promise the rest of the app is built on.
+
+To exercise everything downstream of transcription — notes, questions, prequestions,
+study — run that one step on the Mac, which does have the models, and load the result:
+
+```bash
+swift ios/tools/transcribe_on_host.swift path/to/audio.m4a > segments.json
+```
+
+It uses the same framework and the same chunking rule as the app, so the segments are
+the ones the phone would have produced.
+
 ## What works now (Phase 0–1)
 
 | Area | Status |
@@ -71,7 +92,7 @@ without changing the Simulator.
 | Onboarding, tab navigation, light/dark | ✅ |
 | Library: search across notes, mode filters, date grouping, swipe-delete, rename | ✅ |
 | Record from mic (`AVAudioRecorder`) with live waveform + pause/resume; import a file | ✅ |
-| On-device transcription with timestamps (`SFSpeechRecognizer`) | ✅ |
+| On-device transcription with timestamps (`SpeechAnalyzer` on iOS 26, `SFSpeechRecognizer` below) | ✅ device only |
 | Recap engine — **Demo**, **Your API key** (Anthropic + any OpenAI-compatible), **On-device** (iOS 26 Foundation Models, guided generation via `@Generable`) | ✅ |
 | Meeting + lecture recap views, tickable action items, scrubbing player, searchable transcript, Markdown share | ✅ |
 | Brains: create, assign recaps, ask (scoped RAG), jump to audio, hand a course to the Study tab | ✅ |

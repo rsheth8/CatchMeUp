@@ -64,6 +64,23 @@ final class QuestionMintTests: XCTestCase {
         XCTAssertEqual(QuestionMint.withArticle("HTTP"), "HTTP")
     }
 
+    /// Found on real material: a GraphQL lecture asked "What is a graphql?".
+    /// A capital past the first letter is a name — nothing reaches that shape
+    /// by being title-cased — so these keep the spelling the lecture used and
+    /// take no article.
+    func testMixedCaseNamesKeepTheirCapitals() {
+        for name in ["GraphQL", "JavaScript", "PostgreSQL", "NumPy", "iOS"] {
+            XCTAssertEqual(QuestionMint.withArticle(name), name)
+        }
+    }
+
+    /// The interior capital has to be what spares a term, not merely having one
+    /// somewhere: an ordinary title-cased phrase is still lowered.
+    func testTitleCasePhrasesAreStillLowered() {
+        XCTAssertEqual(QuestionMint.withArticle("Environment Diagram"), "an environment diagram")
+        XCTAssertEqual(QuestionMint.withArticle("Query"), "a query")
+    }
+
     // MARK: Plurals
 
     func testPluralTermsAreRecognised() {

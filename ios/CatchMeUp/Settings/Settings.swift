@@ -133,6 +133,11 @@ final class AppSettings {
     /// do, and the reminder stays silent when nothing is due.
     var reviewReminder: Bool { didSet { d.set(reviewReminder, forKey: "reviewReminder") } }
     var reviewReminderHour: Int { didSet { d.set(reviewReminderHour, forKey: "reviewReminderHour") } }
+    /// Ask two or three questions before a recap is read for the first time.
+    /// On by default: it costs about forty seconds and it's one of the largest
+    /// free wins in the literature — but it's also the most surprising thing
+    /// the app does, so it's a switch.
+    var prequestions: Bool { didSet { d.set(prequestions, forKey: "prequestions") } }
 
     /// Kept in the Keychain, not UserDefaults.
     var apiKey: String {
@@ -169,6 +174,7 @@ final class AppSettings {
         breakMinutes = dd.object(forKey: "breakMinutes") as? Int ?? 5
         reviewReminder = dd.object(forKey: "reviewReminder") as? Bool ?? true
         reviewReminderHour = dd.object(forKey: "reviewReminderHour") as? Int ?? 18
+        prequestions = dd.object(forKey: "prequestions") as? Bool ?? true
         apiKey = Keychain.get("apiKey") ?? ""
     }
 

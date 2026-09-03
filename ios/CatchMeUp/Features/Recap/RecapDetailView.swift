@@ -7,9 +7,11 @@ struct RecapDetailView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(ProcessingQueue.self) private var queue
     @Environment(StudyStore.self) private var study
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
     @State private var practising = false
+    @State private var prequestions: [StudyItem] = []
 
     @State private var player = AudioPlayer()
     @State private var showTranscript = false
@@ -44,11 +46,39 @@ struct RecapDetailView: View {
             ReviewSessionView(mode: .review, brainID: nil,
                               recordingID: recordingID, limit: 12)
         }
+        // A sheet rather than a cover: the notes are behind it, and it should
+        // look skippable, because it is.
+        .sheet(isPresented: Binding(
+            get: { !prequestions.isEmpty },
+            set: { showing in
+                guard !showing else { return }
+                prequestions = []
+                // Covers the swipe-down as well as the buttons: however the
+                // sheet goes away, the offer is spent. `notePretest` keeps the
+                // first outcome, so a real score already recorded wins over
+                // this fallback.
+                store.notePretest(recordingID, asked: 0, correct: 0)
+            }
+        )) {
+            if let rec = recording {
+                PrequestionView(recording: rec, items: prequestions) { asked, correct in
+                    store.notePretest(recordingID, asked: asked, correct: correct)
+                }
+                .presentationDragIndicator(.visible)
+            }
+        }
         // Enqueueing is all this screen does — the queue owns the work, so
         // walking back to the library no longer cancels it half-done.
         .onAppear {
             maybeProcess()
             refreshAudioState()
+            offerPrequestions()
+        }
+        // A recap opened while it was still transcribing gets its warm-up when
+        // the notes actually land, which is the first moment there is anything
+        // to be primed for.
+        .onChange(of: recording?.isProcessed) { _, done in
+            if done == true { offerPrequestions() }
         }
         // Transcribing pulls the audio down from iCloud and measures it, so the
         // player bar has something new to say once a job lands.
@@ -427,6 +457,14 @@ struct RecapDetailView: View {
                     Spacer(minLength: 0)
                 }
 
+                if let line = pretestLine(rec) {
+                    Divider().opacity(0.5)
+                    Label(line, systemImage: "sunrise")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Button {
                     Haptics.tap()
                     practising = true
@@ -444,6 +482,35 @@ struct RecapDetailView: View {
                             .strokeBorder(Color.hairline)
                     }
             }
+        }
+    }
+
+    /// The before-reading score, once there is one. Shown next to the practice
+    /// offer because that's where the comparison is useful: this is what you
+    /// knew cold, and the questions below are how you find out what stuck.
+    private func pretestLine(_ rec: Recording) -> String? {
+        guard rec.pretestAsked > 0 else { return nil }
+        return "Before reading, you had \(rec.pretestCorrect) of \(rec.pretestAsked)."
+    }
+
+    /// Offers the warm-up, and settles the offer when it can't be made.
+    ///
+    /// A recap with almost no questions in it isn't worth a sheet, and leaving
+    /// the offer open would mean ambushing the reader weeks later when a rewrite
+    /// finally minted enough. Turning the setting off leaves the offer open on
+    /// purpose: that's a global preference, not a decision about this recap.
+    private func offerPrequestions() {
+        guard settings.prequestions,
+              let rec = recording,
+              rec.isProcessed,
+              !rec.pretestSpent,
+              prequestions.isEmpty else { return }
+
+        let picked = Prequestions.pick(from: study.items(forRecording: rec.id))
+        if picked.count >= Prequestions.minimum {
+            prequestions = picked
+        } else {
+            store.notePretest(recordingID, asked: 0, correct: 0)
         }
     }
 

@@ -271,6 +271,16 @@ struct SettingsView: View {
         }
 
         Section {
+            Toggle(isOn: $settings.prequestions) {
+                Label("Questions before you read", systemImage: "sunrise")
+            }
+        } footer: {
+            Text(settings.prequestions
+                 ? "Two or three questions the first time you open a recap. Guessing before you read — and getting it wrong — makes the answer stick when you meet it. Skippable, never scored, and it never touches your review schedule."
+                 : "Recaps open straight to the notes.")
+        }
+
+        Section {
             Toggle(isOn: $settings.modelGrading) {
                 Label("Check answers with the model", systemImage: "text.magnifyingglass")
             }

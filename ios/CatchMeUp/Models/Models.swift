@@ -246,6 +246,21 @@ struct Recording: Codable, Identifiable, Hashable {
     /// A conversion already failed on this file, so leave it alone until asked.
     var optimizeFailed = false
 
+    // MARK: Prequestions
+    //
+    // Guessing at the material before reading it improves what you retain from
+    // the reading, even when the guesses are wrong (Richland, Kornell & Kao
+    // 2009). The chance only exists once — before the first read — so it's
+    // tracked per recap, and `pretestedAt` is set whether the offer was taken
+    // or declined, so nobody is asked twice.
+
+    var pretestedAt: Date?
+    var pretestAsked = 0
+    var pretestCorrect = 0
+
+    /// The offer has been made and settled, one way or the other.
+    var pretestSpent: Bool { pretestedAt != nil }
+
     var displayTitle: String {
         if let t = recap?.title, !t.isEmpty { return t }
         return title
@@ -309,6 +324,7 @@ struct Recording: Codable, Identifiable, Hashable {
         case duration, segments, recap, brainID, processingError, completedActions
         case audioBytes, audioCodec, audioBitRate, audioSampleRate, audioChannels
         case audioRemoved, keepAudioDownloaded, lastPlayedAt, cloudAssetID, optimizeFailed
+        case pretestedAt, pretestAsked, pretestCorrect
     }
 
     init(from d: Decoder) throws {
@@ -336,6 +352,9 @@ struct Recording: Codable, Identifiable, Hashable {
         lastPlayedAt = try c.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
         cloudAssetID = try c.decodeIfPresent(String.self, forKey: .cloudAssetID)
         optimizeFailed = try c.decodeIfPresent(Bool.self, forKey: .optimizeFailed) ?? false
+        pretestedAt = try c.decodeIfPresent(Date.self, forKey: .pretestedAt)
+        pretestAsked = try c.decodeIfPresent(Int.self, forKey: .pretestAsked) ?? 0
+        pretestCorrect = try c.decodeIfPresent(Int.self, forKey: .pretestCorrect) ?? 0
     }
 }
 

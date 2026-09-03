@@ -212,6 +212,20 @@ final class LibraryStore {
         saveRecordings()
     }
 
+    /// Settles the prequestion offer for a recap. Called when the sheet closes
+    /// and also when the recap is opened somewhere a pretest makes no sense —
+    /// either way the offer is spent, because it can only be made before the
+    /// first read.
+    func notePretest(_ recordingID: UUID, asked: Int, correct: Int) {
+        guard let i = recordings.firstIndex(where: { $0.id == recordingID }),
+              recordings[i].pretestedAt == nil else { return }
+        recordings[i].pretestedAt = Date()
+        recordings[i].pretestAsked = asked
+        recordings[i].pretestCorrect = correct
+        recordings[i].updatedAt = Date()
+        saveRecordings()
+    }
+
     /// What retention and cloud eviction both key off.
     func markPlayed(_ recordingID: UUID) {
         guard let i = recordings.firstIndex(where: { $0.id == recordingID }) else { return }

@@ -33,8 +33,17 @@ struct BrainsView: View {
             .navigationDestination(for: UUID.self) { id in
                 if store.brain(id) != nil {
                     BrainDetailView(brainID: id)
-                } else {
+                } else if store.recording(id) != nil {
+                    // This stack carries recap IDs too — pushed after a
+                    // recording made from inside a brain.
                     RecapDetailView(recordingID: id)
+                } else {
+                    // A link that outlived what it pointed at: a notification
+                    // or widget for something deleted since. It used to land
+                    // on "Recap not found" even when the missing thing was a
+                    // brain, which names the wrong noun.
+                    ContentUnavailableView("This is no longer here",
+                                           systemImage: "questionmark.folder")
                 }
             }
             .toolbar {

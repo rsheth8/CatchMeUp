@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/logo.png" width="88" alt="CatchMeUp constellation C">
+  <img src="docs/brand/logo.png" width="168" alt="CatchMeUp constellation C">
 </p>
 
 <h1 align="center">CatchMeUp</h1>
@@ -593,3 +593,10 @@ xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
 <p align="center">
   <sub>MIT License · Audio on-device · Your key, your model</sub>
 </p>
+
+## Contributing
+
+PRs and issues welcome. How to run tests, env vars, and the expected layout: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Don't commit `.env`, API keys, or personal recordings.
+

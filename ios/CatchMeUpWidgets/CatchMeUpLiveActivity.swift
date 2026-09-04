@@ -37,7 +37,8 @@ struct CatchMeUpLiveActivity: Widget {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                             Spacer()
-                            if !context.state.isComplete, !context.state.isPaused {
+                            if !context.state.isComplete, !context.state.isPaused,
+                               context.state.isIndeterminate != true {
                                 ProgressView(value: context.state.progress)
                                     .tint(accent(context))
                                     .frame(width: 78)
@@ -63,7 +64,7 @@ struct CatchMeUpLiveActivity: Widget {
 
     @ViewBuilder
     private func progressLabel(_ context: ActivityViewContext<CatchMeUpActivityAttributes>) -> some View {
-        if context.state.isComplete || context.state.isPaused {
+        if context.state.isComplete || context.state.isPaused || context.state.isIndeterminate == true {
             Image(systemName: context.state.symbol)
                 .foregroundStyle(accent(context))
         } else {
@@ -88,7 +89,7 @@ struct CatchMeUpLiveActivity: Widget {
 
     private func voiceOverLabel(_ context: ActivityViewContext<CatchMeUpActivityAttributes>) -> String {
         var parts = [context.attributes.title, context.state.stage]
-        if !context.state.isComplete, !context.state.isPaused {
+        if !context.state.isComplete, !context.state.isPaused, context.state.isIndeterminate != true {
             parts.append("\(Int(context.state.progress * 100)) percent")
         }
         if let eta = context.state.etaText { parts.append(eta) }
@@ -105,7 +106,9 @@ private struct LockScreenActivityView: View {
             : Color(red: 0.38, green: 0.83, blue: 0.75)
     }
 
-    private var showsBar: Bool { !context.state.isComplete && !context.state.isPaused }
+    private var showsBar: Bool {
+        !context.state.isComplete && !context.state.isPaused && context.state.isIndeterminate != true
+    }
 
     var body: some View {
         HStack(spacing: 14) {

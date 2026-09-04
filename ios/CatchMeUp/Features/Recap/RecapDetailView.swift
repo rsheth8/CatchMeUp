@@ -164,15 +164,17 @@ struct RecapDetailView: View {
 
                 if rec.mode != .meeting { RecapMaterialsCard(recording: rec) }
 
-                if let job = queue.job(for: recordingID) {
+                if let job = queue.job(for: recordingID), case .failed(let message) = job.phase {
+                    errorCard(message, hasTranscript: job.step > 0)
+                } else if let job = queue.job(for: recordingID) {
                     ProcessingCard(job: job, tint: rec.mode.accent) {
                         queue.cancel(recordingID)
                     } onRestyle: { mode in
                         queue.restyle(recordingID, as: mode)
                     }
                     .transition(.opacity)
-                } else if let err = rec.processingError, rec.recap == nil {
-                    errorCard(err)
+                } else if let err = rec.processingError {
+                    errorCard(err, hasTranscript: !rec.segments.isEmpty)
                 }
 
                 if rec.mode == .meeting {
@@ -731,6 +733,8 @@ struct RecapDetailView: View {
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(player.isPlaying ? "Pause recording" : "Play recording")
+            .accessibilityIdentifier("recap.playback")
 
             Button { player.skip(15) } label: {
                 Image(systemName: "goforward.15").font(.title3)
@@ -758,13 +762,15 @@ struct RecapDetailView: View {
         }
     }
 
-    private func errorCard(_ msg: String) -> some View {
+    private func errorCard(_ msg: String, hasTranscript: Bool) -> some View {
         Card(tint: .orange) {
             VStack(alignment: .leading, spacing: 11) {
-                Label("Couldn't finish the notes", systemImage: "exclamationmark.triangle.fill")
+                Label(hasTranscript ? "Notes need another try" : "Transcription needs another try", systemImage: "exclamationmark.triangle.fill")
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
                 Text(msg).font(.caption).foregroundStyle(.secondary)
-                Button("Try again") { retryProcessing() }
+                Text(hasTranscript ? "Your transcript is saved. Only the notes will be retried." : "Your audio is saved. No need to import or record it again.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(hasTranscript ? "Retry notes" : "Retry transcription") { retryProcessing() }
                     .buttonStyle(.prominent(.orange))
             }
         }
@@ -1062,9 +1068,19 @@ struct ProcessingCard: View {
                     row(index: index, title: step.0)
                 }
 
-                ProgressView(value: overall)
-                    .tint(job.phase == .paused ? .secondary : tint)
-                    .animation(.gentle, value: overall)
+                if job.phase.isIndeterminate && job.phase.isActive {
+                    ProgressView().tint(tint)
+                } else if job.showsProgress {
+                    ProgressView(value: overall)
+                        .tint(job.phase == .paused ? .secondary : tint)
+                        .animation(.gentle, value: overall)
+                }
+
+                if case .preparing(let stage) = job.phase {
+                    Text(stage.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if job.phase.isActive || job.phase == .queued {
                     footer
@@ -1082,7 +1098,7 @@ struct ProcessingCard: View {
                 }
             }
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(job.displayLabel)
         .accessibilityValue(accessibilityValue)
         .accessibilityAddTraits(.updatesFrequently)
@@ -1099,9 +1115,11 @@ struct ProcessingCard: View {
             Text(job.displayLabel)
                 .font(.subheadline.weight(.semibold))
             Spacer(minLength: 8)
-            Text("\(Int(overall * 100))%")
-                .font(.caption.weight(.bold).monospacedDigit())
-                .foregroundStyle(.secondary)
+            if job.showsProgress {
+                Text("\(Int(overall * 100))%")
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1110,14 +1128,9 @@ struct ProcessingCard: View {
             icon(for: index)
                 .frame(width: 20)
             Text(title)
-                .font(.footnote.weight(index == job.phase.step ? .semibold : .regular))
-                .foregroundStyle(index <= job.phase.step ? .primary : .secondary)
+                .font(.footnote.weight(index == job.step ? .semibold : .regular))
+                .foregroundStyle(index <= job.step ? .primary : .secondary)
             Spacer(minLength: 0)
-            if index == job.phase.step, let percent = stepPercent {
-                Text(percent)
-                    .font(.caption2.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(tint)
-            }
         }
     }
 
@@ -1130,9 +1143,7 @@ struct ProcessingCard: View {
                     .monospacedDigit()
                     .contentTransition(.numericText())
             }
-            // Leaving is the whole point of doing this in the background, so
-            // say so rather than making the user guess whether it's safe.
-            Text("· keeps going if you leave")
+            Text(job.phase.isTranscription ? "Keep the app open for transcription" : "Progress is saved if paused")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
@@ -1147,21 +1158,11 @@ struct ProcessingCard: View {
         }
     }
 
-    private var stepPercent: String? {
-        switch job.phase {
-        case .transcribing(let p), .writing(let p):
-            guard p > 0 else { return nil }
-            return "\(Int(p * 100))%"
-        default:
-            return nil
-        }
-    }
-
     @ViewBuilder
     private func icon(for index: Int) -> some View {
-        if index < job.phase.step {
+        if index < job.step {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(tint)
-        } else if index == job.phase.step {
+        } else if index == job.step {
             switch job.phase {
             case .paused:
                 Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
@@ -1172,7 +1173,7 @@ struct ProcessingCard: View {
             default:
                 // A determinate bar carries the progress; Reduce Motion turns
                 // the spinner into a static marker rather than a second one.
-                if reduceMotion {
+                if reduceMotion || job.phase.isIndeterminate {
                     Image(systemName: "circle.dotted").foregroundStyle(tint)
                 } else {
                     ProgressView().controlSize(.small)
@@ -1184,7 +1185,8 @@ struct ProcessingCard: View {
     }
 
     private var accessibilityValue: String {
-        var parts = ["\(Int(overall * 100)) percent"]
+        var parts = job.showsProgress ? ["\(Int(overall * 100)) percent"] : [job.displayLabel]
+        if case .preparing(let stage) = job.phase { parts.append(stage.detail) }
         if let eta = job.etaSeconds, job.phase.isActive {
             parts.append("\(etaText(eta)) remaining")
         }

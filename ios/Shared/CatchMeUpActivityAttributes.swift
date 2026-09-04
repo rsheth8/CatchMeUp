@@ -13,6 +13,8 @@ struct CatchMeUpActivityAttributes: ActivityAttributes {
         /// Waiting on background time. Drawn differently so a stalled
         /// percentage doesn't masquerade as live progress.
         var isPaused: Bool = false
+        /// Optional so an activity created by an older app still decodes.
+        var isIndeterminate: Bool? = nil
     }
 
     var recordingID: String

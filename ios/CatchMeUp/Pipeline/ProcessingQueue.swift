@@ -19,6 +19,7 @@ final class ProcessingQueue {
 
     enum Phase: Equatable {
         case queued
+        case preparing(SpeechPreparation)
         case transcribing(Double)
         case writing(Double)
         /// Background time ran out. Not an error — it will resume.
@@ -28,7 +29,7 @@ final class ProcessingQueue {
 
         var isActive: Bool {
             switch self {
-            case .transcribing, .writing: return true
+            case .preparing, .transcribing, .writing: return true
             default: return false
             }
         }
@@ -44,17 +45,18 @@ final class ProcessingQueue {
         var step: Int {
             switch self {
             case .queued: return 0
-            case .transcribing: return 0
+            case .preparing, .transcribing: return 0
             case .writing: return 1
             case .paused: return 1
             case .done: return 2
-            case .failed: return 1
+            case .failed: return 0 // A failure alone never proves transcription completed.
             }
         }
 
         var label: String {
             switch self {
             case .queued: return "Waiting its turn"
+            case .preparing(let stage): return stage.label
             case .transcribing: return "Transcribing on device"
             case .writing: return "Writing your notes"
             case .paused: return "Paused — will finish shortly"
@@ -66,6 +68,7 @@ final class ProcessingQueue {
         var symbol: String {
             switch self {
             case .queued: return "clock"
+            case .preparing: return "arrow.down.circle"
             case .transcribing: return "waveform"
             case .writing: return "sparkles"
             case .paused: return "pause.circle"
@@ -73,13 +76,51 @@ final class ProcessingQueue {
             case .failed: return "exclamationmark.triangle.fill"
             }
         }
+
+        var isTranscription: Bool {
+            switch self {
+            case .preparing, .transcribing: return true
+            default: return false
+            }
+        }
+
+        var isIndeterminate: Bool {
+            switch self {
+            case .queued, .preparing, .transcribing(0): return true
+            default: return false
+            }
+        }
     }
 
     struct Job: Identifiable, Equatable {
         let id: UUID
+        var attemptID = UUID()
         var title: String
         var mode: Mode
         var phase: Phase = .queued
+        /// Retain the actual stage when interrupted, instead of inventing a
+        /// completed transcript for every failure or background pause.
+        var interruptedPhase: Phase = .queued
+
+        var progressPhase: Phase {
+            switch phase {
+            case .failed, .paused: return interruptedPhase
+            default: return phase
+            }
+        }
+
+        var step: Int { progressPhase.step }
+
+        var showsProgress: Bool {
+            if case .failed = phase { return false }
+            return !progressPhase.isIndeterminate
+        }
+
+        mutating func interrupt(with phase: Phase) {
+            if self.phase.isActive || self.phase == .queued { interruptedPhase = self.phase }
+            self.phase = phase
+            etaSeconds = nil
+        }
         /// Length of the audio, which is what the transcription estimate keys off.
         var audioSeconds: Double = 0
         /// Known once there's a transcript; estimated from the audio before that.
@@ -92,6 +133,9 @@ final class ProcessingQueue {
         /// User-facing phase, including which notes we're writing so the card
         /// isn't a mystery when restyling a lecture as a meeting.
         var displayLabel: String {
+            if case .failed = phase {
+                return step == 0 ? "Transcription needs another try" : "Notes need another try"
+            }
             if case .writing = phase {
                 return mode == .lecture ? "Writing lecture notes" : "Writing meeting notes"
             }
@@ -109,13 +153,13 @@ final class ProcessingQueue {
             let total = transcribeCost + writeCost
             guard total > 0 else { return phase == .done ? 1 : 0 }
 
-            switch phase {
-            case .queued: return 0
+            switch progressPhase {
+            case .queued, .preparing: return 0
             case .transcribing(let p): return (transcribeCost * p) / total
             case .writing(let p): return (transcribeCost + writeCost * p) / total
-            case .paused: return transcribeCost / total
+            case .paused: return 0
             case .done: return 1
-            case .failed: return transcribeCost / total
+            case .failed: return 0
             }
         }
     }
@@ -190,7 +234,7 @@ final class ProcessingQueue {
         if let index = jobs.firstIndex(where: { $0.id == recordingID }) {
             if jobs[index].phase.isFinished {
                 jobs.remove(at: index)
-            } else if case .transcribing = jobs[index].phase {
+            } else if jobs[index].phase.isTranscription {
                 jobs[index].mode = mode
                 return
             } else {
@@ -264,6 +308,8 @@ final class ProcessingQueue {
         if wasRunning {
             worker?.cancel()
             worker = nil
+            workerGeneration += 1
+            activity.end()
             startWorkerIfNeeded()
         }
     }
@@ -274,7 +320,7 @@ final class ProcessingQueue {
         guard worker == nil, !parked else { return }
         guard jobs.contains(where: { $0.phase == .queued }) else { return }
 
-        RecapNotifier.prepare()
+        if !settings.isShowcase { RecapNotifier.prepare() }
         activity.begin(name: "Writing recap notes") { [weak self] in
             self?.parkForLaterResumption()
         }
@@ -294,9 +340,9 @@ final class ProcessingQueue {
             }
         }
 
-        while !parked, !Task.isCancelled,
+        while generation == workerGeneration, !parked, !Task.isCancelled,
               let next = jobs.first(where: { $0.phase == .queued })?.id {
-            await run(next)
+            await run(next, generation: generation)
             // Give the run loop a turn so SwiftUI can draw the finished state
             // before the next job repaints the same rows.
             await Task.yield()
@@ -310,11 +356,11 @@ final class ProcessingQueue {
         parked = true
         worker?.cancel()
         worker = nil
+        workerGeneration += 1
         activity.end()
 
         for index in jobs.indices where jobs[index].phase.isActive || jobs[index].phase == .queued {
-            jobs[index].phase = .paused
-            jobs[index].etaSeconds = nil
+            jobs[index].interrupt(with: .paused)
         }
         Task { await liveActivity.paused() }
         BackgroundRefresh.schedule(needsNetwork: settings.engineKind == .apiKey)
@@ -334,32 +380,48 @@ final class ProcessingQueue {
 
     // MARK: One job
 
-    private func run(_ recordingID: UUID) async {
+    private enum TranscriptionUpdate {
+        case status(SpeechPreparation)
+        case progress(Double)
+    }
+
+    private func run(_ recordingID: UUID, generation: Int) async {
         guard var recording = store.recording(recordingID) else {
             jobs.removeAll { $0.id == recordingID }
             return
         }
 
-        let rewriteOnly = job(for: recordingID)?.rewriteOnly ?? false
+        // A resumed job may have saved its transcript before being parked.
+        // Resume at notes even when the original request was a full run.
+        let rewriteOnly = (job(for: recordingID)?.rewriteOnly ?? false)
+            || (!recording.segments.isEmpty && recording.recap == nil)
+        let attemptID = UUID()
         update(recordingID) { job in
+            job.attemptID = attemptID
+            job.rewriteOnly = rewriteOnly
             job.startedAt = Date()
-            job.phase = rewriteOnly ? .writing(0) : .transcribing(0)
+            job.phase = rewriteOnly ? .writing(0) : .preparing(.audio)
+            if !rewriteOnly { job.etaSeconds = nil }
             job.phaseStartedAt = Date()
         }
         recording.processingError = nil
 
         store.upsert(withCurrentAudio(recording))
-        await liveActivity.start(for: recording, phase: rewriteOnly ? .writing(0) : .transcribing(0))
+        await liveActivity.start(for: recording, phase: rewriteOnly ? .writing(0) : .preparing(.audio))
+        guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
 
         if !rewriteOnly {
             do {
-                recording = try await transcribe(recording)
+                recording = try await transcribe(recording, attemptID: attemptID, generation: generation)
+                guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
                 recording.meeting = store.recording(recordingID)?.meeting
                 store.upsert(withCurrentAudio(recording))
             } catch is CancellationError {
+                guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
                 markParked(recordingID)
                 return
             } catch {
+                guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
                 fail(recordingID, recording, error.localizedDescription)
                 return
             }
@@ -376,42 +438,72 @@ final class ProcessingQueue {
         }
 
         do {
-            recording = try await writeNotes(recording)
+            recording = try await writeNotes(recording, attemptID: attemptID, generation: generation)
+            guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
             recording.meeting?.preserveUserChanges(from: store.recording(recordingID)?.meeting)
             store.upsert(withCurrentAudio(recording))
             finish(recordingID, recording)
         } catch is CancellationError {
+            guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
             markParked(recordingID)
         } catch {
+            guard isCurrent(recordingID, attemptID: attemptID, generation: generation) else { return }
             fail(recordingID, recording, error.localizedDescription)
         }
     }
 
-    private func transcribe(_ recording: Recording) async throws -> Recording {
+    private func transcribe(_ recording: Recording, attemptID: UUID, generation: Int) async throws -> Recording {
         var recording = recording
         let engine = settings.engineKind
-        let transcriber = Transcription.engine(demo: engine == .demo)
+        let transcriber = Transcription.engine(demo: engine == .demo, mode: recording.mode)
         let started = Date()
 
         // Pulls the file down from iCloud first when it isn't on the device.
-        guard let audio = try? await store.audio.ensureLocal(for: recording) else {
+        if !recording.hasAudio, engine == .demo {
             // No audio and no transcript is the demo-seed case, not a failure.
             if recording.segments.isEmpty, engine == .demo {
                 recording.segments = SampleData.meetingRecording.segments
             }
             return recording
         }
+        let audio = try await store.audio.ensureLocal(for: recording)
+        try Task.checkCancellation()
 
-        let segments = try await transcriber.transcribe(url: audio) { [weak self] progress in
-            Task { @MainActor in
-                self?.noteTranscriptionProgress(recording.id, progress: progress)
+        let recordingID = recording.id
+        let (events, continuation) = AsyncStream<TranscriptionUpdate>.makeStream()
+        // One consumer preserves callback order, including the transition from
+        // a timed-out attempt to recovery. Separate Tasks could arrive late.
+        let updates = Task { @MainActor [weak self] in
+            for await event in events {
+                guard !Task.isCancelled, let self,
+                      self.isCurrent(recordingID, attemptID: attemptID, generation: generation),
+                      self.job(for: recordingID)?.phase.isTranscription == true else { return }
+                switch event {
+                case .status(let stage):
+                    self.update(recordingID) { job in
+                        job.phase = .preparing(stage)
+                        job.etaSeconds = nil
+                        job.phaseStartedAt = Date()
+                    }
+                    await self.liveActivity.update(phase: .preparing(stage), eta: nil)
+                case .progress(let progress):
+                    self.noteTranscriptionProgress(recordingID, progress: progress)
+                }
             }
         }
+        defer { continuation.finish(); updates.cancel() }
+        let segments = try await transcriber.transcribe(url: audio,
+            status: { continuation.yield(.status($0)) },
+            progress: { continuation.yield(.progress($0)) })
+        continuation.finish()
+        await updates.value
+        try Task.checkCancellation()
         recording.segments = segments
 
         // One read covers duration, size and format, which is what the storage
         // screen and the optimizer both need.
         if let facts = await AudioFile.facts(at: audio) { recording.apply(facts) }
+        try Task.checkCancellation()
 
         ProcessingStatsStore.recordTranscription(
             audioSeconds: recording.duration,
@@ -425,7 +517,7 @@ final class ProcessingQueue {
         return recording
     }
 
-    private func writeNotes(_ recording: Recording) async throws -> Recording {
+    private func writeNotes(_ recording: Recording, attemptID: UUID, generation: Int) async throws -> Recording {
         var recording = recording
         let engine = settings.engineKind
         let transcript = recording.segments.timestampedText
@@ -437,6 +529,7 @@ final class ProcessingQueue {
             job.etaSeconds = self.rates.writeSeconds(characters: transcript.count)
         }
         await liveActivity.update(phase: .writing(0), eta: job(for: recording.id)?.etaSeconds)
+        try Task.checkCancellation()
 
         let started = Date()
         let recapEngine = RecapEngineFactory.make(settings)
@@ -445,16 +538,23 @@ final class ProcessingQueue {
             mode: recording.mode
         ) { [weak self] progress in
             Task { @MainActor in
-                self?.noteWritingProgress(recording.id, progress: recording.mode == .meeting && engine != .demo ? progress * 0.8 : progress)
+                guard let self, self.isCurrent(recording.id, attemptID: attemptID, generation: generation),
+                      case .writing = self.job(for: recording.id)?.phase else { return }
+                self.noteWritingProgress(recording.id, progress: recording.mode == .meeting && engine != .demo ? progress * 0.8 : progress)
             }
         }
+        try Task.checkCancellation()
         recording.processingError = nil
 
         if recording.mode == .meeting, engine != .demo {
             do {
                 let attached = MaterialStore.shared.materials(forRecording: recording.id)
                 recording.meeting = try await recapEngine.meetingWorkspace(for: recording, materials: attached) { [weak self] progress in
-                    Task { @MainActor in self?.noteWritingProgress(recording.id, progress: 0.8 + 0.2 * progress) }
+                    Task { @MainActor in
+                        guard let self, self.isCurrent(recording.id, attemptID: attemptID, generation: generation),
+                              case .writing = self.job(for: recording.id)?.phase else { return }
+                        self.noteWritingProgress(recording.id, progress: 0.8 + 0.2 * progress)
+                    }
                 }
                 if attached.contains(where: { !$0.state.isReady }) {
                     recording.meeting?.analysisNotice = "Some attachments were still being read. Refresh meeting insights when they are ready."
@@ -468,6 +568,7 @@ final class ProcessingQueue {
             }
         }
 
+        try Task.checkCancellation()
         ProcessingStatsStore.recordWrite(
             characters: transcript.count,
             elapsed: Date().timeIntervalSince(started),
@@ -481,9 +582,15 @@ final class ProcessingQueue {
     private var rates: ProcessingRates { ProcessingStatsStore.rates(for: settings.engineKind) }
 
     private func noteTranscriptionProgress(_ recordingID: UUID, progress: Double) {
+        guard progress.isFinite else { return }
         let clamped = min(max(progress, 0), 1)
         update(recordingID) { job in
-            job.phase = .transcribing(clamped)
+            if case .transcribing(let previous) = job.phase {
+                job.phase = .transcribing(max(previous, clamped))
+            } else {
+                job.phaseStartedAt = Date()
+                job.phase = .transcribing(clamped)
+            }
             job.etaSeconds = self.estimate(for: job, observing: clamped)
         }
         let eta = job(for: recordingID)?.etaSeconds
@@ -491,9 +598,11 @@ final class ProcessingQueue {
     }
 
     private func noteWritingProgress(_ recordingID: UUID, progress: Double) {
+        guard progress.isFinite else { return }
         let clamped = min(max(progress, 0), 1)
         update(recordingID) { job in
-            job.phase = .writing(clamped)
+            guard case .writing(let previous) = job.phase else { return }
+            job.phase = .writing(max(previous, clamped))
             job.etaSeconds = self.estimate(for: job, observing: clamped)
         }
         let eta = job(for: recordingID)?.etaSeconds
@@ -549,7 +658,7 @@ final class ProcessingQueue {
         StudyNotifier.reschedule(study: study, settings: settings)
         Task { await liveActivity.finish(success: true) }
 
-        if UIApplication.shared.applicationState != .active {
+        if !settings.isShowcase, UIApplication.shared.applicationState != .active {
             RecapNotifier.recapReady(recording)
         }
         forget(recordingID, after: 2.5)
@@ -590,12 +699,11 @@ final class ProcessingQueue {
         store.upsert(withCurrentAudio(recording))
 
         update(recordingID) { job in
-            job.phase = .failed(message)
-            job.etaSeconds = nil
+            job.interrupt(with: .failed(message))
         }
         Task { await liveActivity.finish(success: false) }
 
-        if UIApplication.shared.applicationState != .active {
+        if !settings.isShowcase, UIApplication.shared.applicationState != .active {
             RecapNotifier.recapFailed(recording, message: message)
         }
         forget(recordingID, after: 4)
@@ -605,18 +713,22 @@ final class ProcessingQueue {
     /// next resume picks it straight back up.
     private func markParked(_ recordingID: UUID) {
         update(recordingID) { job in
-            job.phase = .paused
-            job.etaSeconds = nil
+            job.interrupt(with: .paused)
         }
     }
 
     /// Rows read their state from the recording once a job is gone, so the job
     /// only needs to live long enough for the finished state to be seen.
     private func forget(_ recordingID: UUID, after delay: TimeInterval) {
+        let attemptID = job(for: recordingID)?.attemptID
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            self?.jobs.removeAll { $0.id == recordingID && $0.phase.isFinished }
+            self?.jobs.removeAll { $0.id == recordingID && $0.attemptID == attemptID && $0.phase.isFinished }
         }
+    }
+
+    private func isCurrent(_ recordingID: UUID, attemptID: UUID, generation: Int) -> Bool {
+        !Task.isCancelled && workerGeneration == generation && job(for: recordingID)?.attemptID == attemptID
     }
 
     private func update(_ recordingID: UUID, _ change: (inout Job) -> Void) {
@@ -630,11 +742,11 @@ final class ProcessingQueue {
 /// The set of recordings the user has asked us to process, on disk. Survives
 /// being force-quit mid-transcription, which is the case the whole background
 /// path exists for.
-private enum PendingJobs {
+@MainActor private enum PendingJobs {
     private static let key = "queue.pendingRecordings"
 
     static var ids: Set<UUID> {
-        let raw = UserDefaults.standard.stringArray(forKey: key) ?? []
+        let raw = (ShowcaseSession.shared.isActive ? ShowcaseSession.defaults : .standard).stringArray(forKey: key) ?? []
         return Set(raw.compactMap(UUID.init(uuidString:)))
     }
 
@@ -660,6 +772,6 @@ private enum PendingJobs {
     }
 
     private static func write(_ ids: Set<UUID>) {
-        UserDefaults.standard.set(ids.map(\.uuidString), forKey: key)
+        (ShowcaseSession.shared.isActive ? ShowcaseSession.defaults : .standard).set(ids.map(\.uuidString), forKey: key)
     }
 }

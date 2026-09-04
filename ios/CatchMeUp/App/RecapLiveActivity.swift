@@ -84,7 +84,8 @@ final class RecapLiveActivity {
             symbol: phase.symbol,
             isComplete: phase.isFinished,
             etaText: eta.map { etaText($0) + " left" },
-            isPaused: phase == .paused
+            isPaused: phase == .paused,
+            isIndeterminate: phase.isIndeterminate
         )
 
         // Whatever we last said is only trustworthy for as long as we expected

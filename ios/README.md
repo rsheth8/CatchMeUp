@@ -89,6 +89,40 @@ python3 ios/tools/load_cli_data.py --match "Program Efficiency, Part 2" --with-a
 Use `--replace` for a clean iOS library instead of a merge, or `--dry-run` to inspect the count
 without changing the Simulator.
 
+### Transcription on older iPhones
+
+The recap engine and speech recognition are separate. A Claude (or other provider) API
+key writes notes **after** Apple Speech turns audio into text. Transcription does not
+require Apple Intelligence, and audio is not sent to the recap provider.
+
+On iOS 26, SpeechAnalyzer uses SpeechTranscriber when the device/language supports it,
+or DictationTranscriber with its timestamped long-dictation preset on older hardware.
+The system downloads and reserves the language model on first use. The app shows audio
+preparation, model download, and speech startup separately, without an invented 0% or ETA.
+Stay online and keep the app open for the first model download. Model installation is
+limited to five minutes. Explicit analyzer preflight has a separate three-minute
+deadline, so cold startup no longer consumes the two-minute recognition inactivity
+budget. Intermediate speech results refresh that inactivity timer and advance the
+audio cursor; only finalized text is saved, avoiding duplicate transcript sentences.
+
+Language lookup, startup and recognition deadlines get **one automatic retry** with
+“Restarting Apple Speech” shown inline. Permission, unsupported-language, bad-audio,
+model-download and provider errors are not blindly retried. Stop cancels recovery.
+If both attempts fail, the screen immediately offers **Retry transcription**; a notes
+failure offers **Retry notes** and reuses the saved transcript. Failed/paused work
+retains its actual stage, and errors never invent a completed transcription or 82%.
+Old attempt callbacks cannot overwrite a newer job. The progress card displays one
+overall percentage rather than competing per-step and overall percentages.
+
+For device diagnosis, `speech.recentAttempts` in local app preferences retains the last
+40 stage events (language/model/startup/transcription, attempt, timing and outcome),
+including failures followed by success. It contains no audio, transcript, recording
+titles/IDs, credentials, or provider response bodies. Nothing is uploaded.
+
+iOS 17–25 retains SFSpeechRecognizer, now with a cancellation-safe inactivity timeout.
+It requires on-device recognition support and never silently switches to Apple's servers.
+This legacy dictation engine is less suitable for long recordings than SpeechAnalyzer.
+
 ### Transcription does not run in the Simulator
 
 The Simulator ships no speech models, so this is the one step you cannot exercise there.
@@ -96,9 +130,9 @@ Both engines claim to be present and neither works: `SFSpeechRecognizer` reports
 `isAvailable` and `supportsOnDeviceRecognition` as true and then fails with
 `kAFAssistantErrorDomain Code=1101`, and iOS 26's `SpeechAnalyzer` reports
 `SpeechTranscriber.isAvailable == false` with zero supported locales and
-`AssetInventory.status == .unsupported`. Both work on a real device. There is nothing
-to fix in the app — server-based recognition would transcribe fine here, but it would
-send the audio to Apple and break the promise the rest of the app is built on.
+`AssetInventory.status == .unsupported`. Real-device testing is required for model
+installation and speech accuracy. The app does not switch to server-based recognition
+to work around unavailable local models.
 
 To exercise everything downstream of transcription — notes, questions, prequestions,
 study — run that one step on the Mac, which does have the models, and load the result:

@@ -3,7 +3,6 @@ on:
   pull_request:
     paths: ['catchmeup/**', 'tests/**', 'packaging/**', 'pyproject.toml', 'MANIFEST.in', 'catchup', 'watch_and_process.sh', '.github/workflows/cli.yml']
   push:
-    branches: [main]
     paths: ['catchmeup/**', 'tests/**', 'packaging/**', 'pyproject.toml', 'MANIFEST.in', 'catchup', 'watch_and_process.sh', '.github/workflows/cli.yml']
   workflow_dispatch:
 permissions:

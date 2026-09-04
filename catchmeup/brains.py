@@ -102,6 +102,8 @@ def slugify(name: str) -> str:
 
 
 def brain_dir(slug: str) -> Path:
+    if not slug or slug in {".", ".."} or "/" in slug or "\\" in slug:
+        raise ValueError("Use a brain name, not a filesystem path.")
     return brains_root() / slug
 
 

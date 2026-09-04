@@ -1,0 +1,64 @@
+name: CLI checks and distribution candidates
+on:
+  pull_request:
+    paths: ['catchmeup/**', 'tests/**', 'packaging/**', 'pyproject.toml', 'MANIFEST.in', 'catchup', 'watch_and_process.sh', '.github/workflows/cli.yml']
+  push:
+    branches: [main]
+    paths: ['catchmeup/**', 'tests/**', 'packaging/**', 'pyproject.toml', 'MANIFEST.in', 'catchup', 'watch_and_process.sh', '.github/workflows/cli.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python: ['3.10', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install audio test dependency (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install audio test dependency (Mac)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - run: python -m pip install '.[build]'
+      - run: python -m unittest discover -q
+      - run: python -m build && python -m twine check dist/*
+      - run: python packaging/audit.py dist/*.whl dist/*.tar.gz
+      - name: Test wheel in a clean environment outside checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/catchup-wheel-test"
+          "$RUNNER_TEMP/catchup-wheel-test/bin/python" -m pip install dist/*.whl
+          python packaging/smoke.py "$RUNNER_TEMP/catchup-wheel-test/bin/catchup"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-package-${{ matrix.os }}-${{ matrix.python }}
+          path: dist/*
+  mac-bundle:
+    needs: test-package
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install '.[build]'
+      - run: python -m PyInstaller --noconfirm packaging/catchup.spec
+      - run: python packaging/smoke.py dist/catchup/catchup
+      - name: Archive candidate and calculate checksum (not a public release)
+        run: |
+          tar -czf "dist/catchup-macos-$(uname -m).tar.gz" -C dist catchup
+          cd dist
+          shasum -a 256 catchup-macos-*.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle-candidate
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS

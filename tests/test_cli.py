@@ -42,7 +42,7 @@ class CliTests(IsolatedHome):
         self.assertIn("clip", result.stdout)
         self.assertIn("rec", result.stdout)
         self.assertIn("diff", result.stdout)
-        self.assertIn("./catchup help", result.stdout)
+        self.assertIn("catchup help", result.stdout)
         self.assertIn("walk", result.stdout)
         self.assertIn("sync", result.stdout)
         page = self.run_cli("help", "exam")

@@ -41,3 +41,7 @@ MIT-6.0002/
 .cursor/
 .pytest_cache/
 .coverage
+
+# CLI distribution outputs (never user libraries)
+build/
+dist/

@@ -31,7 +31,7 @@
 
 Live-capture tools assume you were in the room. CatchMeUp assumes you were not.
 
-Drop a Zoom export, a lecture capture, or a folder of OCW videos. Audio is transcribed **on your Mac** with WhisperKit. Notes are written by **your** LLM — Anthropic, OpenAI, Gemini, Groq, or local Ollama. The same recaps, brains, exams, and clips live on the iPhone through iCloud Drive.
+Drop a Zoom export, a lecture capture, or a folder of OCW videos. Audio is transcribed **on your Mac** with WhisperKit. Notes are written by **your** LLM — Anthropic, OpenAI, Gemini, Groq, or local Ollama. Recaps and brain metadata can be shared with the iPhone through iCloud Drive; copying audio enables playback there. Supporting-material files and study history do not have full cross-device parity.
 
 | You | Drop in | You get |
 |---|---|---|
@@ -44,9 +44,18 @@ Same pipeline either way — only the recap style changes:
 recording  →  ffmpeg (mp3)  →  whisperkit-cli (on-device)  →  your LLM  →  Word + Markdown
 ```
 
-Long lectures are split on timestamps, recapped in passes, then merged. Bring your own API key. Audio never leaves the device.
+Long lectures are split on timestamps, recapped in passes, then merged. Transcription is local;
+AI features send text to your configured provider unless you use a local model. Optional audio
+sync copies recordings to the shared folder, which may upload them through iCloud or another service.
 
-The command is `./catchup`. The iPhone app is in [`ios/`](ios/README.md).
+The installed command is `catchup`; `./catchup` runs the same CLI from a source checkout.
+The iPhone app is in [`ios/`](ios/README.md).
+
+**Release status:** CLI 0.2.0 is a [GitHub preview release](https://github.com/rsheth8/CatchMeUp/releases/tag/v0.2.0),
+not a production-certified Mac installer or a PyPI release. Start with the package or source checkout below.
+The bundled Mac executable remains a developer build pending signing/notarization and clean-Mac integration testing.
+
+Examples below use `./catchup` for a checkout; after package installation, use `catchup` instead.
 
 ## A workspace for school and work
 
@@ -109,7 +118,7 @@ This is text extraction, not full visual understanding: scanned pages need OCR f
 charts, handwriting, slide speaker notes, and animations are not interpreted. Image-only imports
 are rejected with guidance; partially readable files show a warning. Limits are 50 MB per file,
 300 PDF pages/slides, and two million extracted characters. Export Keynote or older PowerPoint
-formats to PDF/PPTX first. Run `./catchup setup` to install the new PDF dependency on an existing install.
+formats to PDF/PPTX first. Update the Python package to install the PDF dependency on an existing install.
 
 **Privacy and sync:** Import, material search, `today`, `prepare`, `review`, and task edits work
 locally without iCloud or an API key. AI commands may send retrieved text to your configured model
@@ -139,25 +148,31 @@ Use `./catchup help materials`, `help tasks`, or `help today` for command option
 
 ```bash
 ./catchup lecture ~/Downloads/week3.mp4
-./catchup sync              # same notes on the phone
+./catchup sync push         # send recaps to the shared folder
 ```
 
 On the phone: **Settings ▸ Sync**, same Apple Account. Recaps auto-push after a CLI run once that iCloud folder exists. `CATCHMEUP_SYNC=0` opts out.
 
 ---
 
-## Install (about 5 minutes)
+## Install the CLI
 
-You need a Mac and [Homebrew](https://brew.sh). **Do not share your `.env`** — that file is the API key.
+The CLI now has one Python entry point for source installs, packages, and bundled
+executables. No running backend is required. **Do not share your `.env`** — it contains your API key.
+
+### Development checkout
 
 ```bash
 git clone https://github.com/rsheth8/CatchMeUp.git
 cd CatchMeUp
-chmod +x catchup watch_and_process.sh
+python3 -m venv venv
+./venv/bin/python3 -m pip install -e .
 ./catchup setup
 ```
 
-`./catchup setup` installs the two packages this cannot run without:
+Python 3.10+ is required for source/package installs. Plain `setup` creates the local
+library without installing software or asking for a key. On a Mac with [Homebrew](https://brew.sh),
+use `./catchup setup --install-audio` to explicitly install missing audio tools:
 
 | Package | What it does |
 |---|---|
@@ -177,7 +192,43 @@ Then pick a provider and a default style:
 ./catchup doctor
 ```
 
-`./catchup doctor` is the send-this-to-a-friend check. If it is green, they are ready.
+`doctor` checks configuration and installed capabilities without a network request;
+it does not prove microphone permission, model availability, or API connectivity.
+Local tasks and material workflows work without audio tools or an API key.
+
+### Installable package and Mac executable
+
+Download `catchmeup-0.2.0-py3-none-any.whl` and `SHA256SUMS` from the
+[GitHub preview release](https://github.com/rsheth8/CatchMeUp/releases/tag/v0.2.0).
+Verify the downloaded file's SHA-256 against its entry in `SHA256SUMS`, then install
+the wheel using [pipx](https://packaging.python.org/en/latest/guides/installing-stand-alone-command-line-tools/)
+(install pipx first if needed):
+
+```sh
+pipx install /absolute/path/to/catchmeup-0.2.0-py3-none-any.whl
+catchup --version
+catchup setup
+catchup today
+```
+
+This installs the downloaded package; version 0.2.0 is not published on PyPI.
+An executable build recipe and CI candidate artifacts are included too. They bundle
+Python, but not FFmpeg, WhisperKit, or model weights. A signed/notarized public Mac
+release, Homebrew tap, and installer are still release work, not available downloads.
+Developers can build their own wheel with `venv/bin/python3 -m pip install -e '.[build]'`
+followed by `venv/bin/python3 -m build`.
+See [CLI distribution and release gates](docs/CLI_DISTRIBUTION.md).
+
+Installed builds default to `~/Library/Application Support/CatchMeUp` on Mac;
+source checkouts continue using their existing library. To use your current data
+with an installed build, set `CATCHMEUP_HOME` to your checkout's absolute path or use:
+
+```sh
+catchup --home /absolute/path/to/existing/CatchMeUp today
+```
+
+Nothing moves or copies your library automatically. Application upgrades do not
+replace this data directory. Input filenames are relative to your current folder.
 
 ### Updating an existing install
 
@@ -189,7 +240,8 @@ git pull --ff-only
 ./catchup today
 ```
 
-This installs the new `pypdf` dependency without rerunning the full recording setup.
+This updates the source install and its dependencies without rerunning audio setup.
+For a pipx installation, install an approved newer wheel with `pipx install --force /path/to/new.whl`.
 The local workspace commands do not need an API key; transcription and AI commands
 still require their respective tools/provider configuration.
 
@@ -290,13 +342,25 @@ Obsidian is optional: `./catchup obsidian cs61a` dumps a vault if you already li
 
 Run `./catchup` or `./catchup help` for the full list.  
 `./catchup help exam` (or `rec`, `brain`, `clip`, …) prints a short page for that command.
+`catchup brain new --help` and `catchup help brain new` work too.
+
+For scripts, put global options before the command: `catchup --no-input --home DIR COMMAND`.
+Use explicit scopes such as `catchup search --brain biology-101 mitochondria`.
+`library`, `search`, `todos`, `diff`, `tasks`, `brain list/new/show`, `status`, `list`,
+`providers`, and `doctor` support `--json`. Other commands reject that option.
+Exit statuses are 0 (success), 1 (operation failed), 2 (invalid arguments), and
+130 (cancelled). `--version` identifies the build; `--debug` enables tracebacks.
+Unknown options are rejected. `--no-input` avoids prompts; exams need `--print`,
+and unattended recording needs `--seconds N`. API keys are hidden at the prompt;
+automation can use provider environment variables or `config PROVIDER --key-stdin`.
 
 <details>
 <summary><strong>Setup & config</strong></summary>
 
 | Command | What it does |
 |---|---|
-| `./catchup setup` | Install ffmpeg, whisperkit-cli, Python, `.env` |
+| `./catchup setup` | Initialize the local library; no downloads or API key required |
+| `./catchup setup --install-audio` | Install missing Mac audio tools through Homebrew |
 | `./catchup doctor` | Check ffmpeg, whisperkit-cli, API key, folders |
 | `./catchup config` | Pick a company and paste its API key |
 | `./catchup config openai` | Same, skipping the menu |
@@ -391,13 +455,16 @@ The CLI is the batch engine. The iOS app is the pocket surface. They share a lib
 ./catchup sync pull
 ```
 
-Prefer Dropbox or a USB stick?
+For a CLI export or a shared-folder workflow (for example, Dropbox or a USB stick):
 
 ```bash
 CATCHMEUP_SYNC_DIR=~/Dropbox/CatchMeUp ./catchup sync push
 ```
 
-The Simulator helper `ios/tools/load_cli_data.py` is only for development. A real iPhone uses this path.
+That override selects a CLI destination; it does not configure the iPhone app to
+read Dropbox or a USB stick. The app's automatic sync uses its iCloud container.
+You can use all local CLI workflows without iCloud. The Simulator helper
+`ios/tools/load_cli_data.py` is only for development.
 
 Build the app: see [`ios/README.md`](ios/README.md).
 
@@ -413,7 +480,8 @@ open CatchMeUp.xcodeproj
 ## Privacy
 
 - **Audio stays on the device** for transcription (WhisperKit on Mac, Apple Speech on iPhone).
-- The **text transcript** is sent to whichever LLM you configured, to write the notes.
+- The **text transcript and relevant supporting text** can be sent to whichever LLM you configured. A local Ollama configuration keeps model requests on your machine.
+- Audio sync is optional: `sync push --with-audio` copies recordings to the shared folder. Automatic audio push is controlled by `CATCHMEUP_SYNC_AUDIO`; `CATCHMEUP_SYNC=0` disables automatic sync.
 - `.env` is gitignored. Don’t zip it, don’t Slack it, don’t commit it.
 
 ---
@@ -441,7 +509,7 @@ open CatchMeUp.xcodeproj
 | `custom` | Any OpenAI-compatible base URL |
 
 ```bash
-./catchup config custom https://your-gateway.example/v1
+./catchup config custom --base-url https://your-gateway.example/v1
 ```
 
 ---
@@ -462,7 +530,10 @@ logs/             pipeline.log
 .env              your API key + default mode — never commit this
 ```
 
-Recaps live under `CATCHMEUP_HOME` (the repo root unless you set it).
+The tree above describes a source checkout. Installed code is separate from user data:
+Mac package/bundle installs default to `~/Library/Application Support/CatchMeUp`.
+Source checkouts retain the repo-local library. `CATCHMEUP_HOME` or `--home DIR`
+overrides the data location; `catchup status` shows the selected directory.
 
 Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 
@@ -483,6 +554,8 @@ Supported media: `.mov` `.mp4` `.m4a` `.mp3` `.wav` `.aac` `.mkv` `.webm`
 | Material is not appearing on iPhone | Material-file sync is not implemented yet; import it on that device |
 
 Full traceback lives in `logs/pipeline.log`.
+For command-interface failures, use `catchup --debug COMMAND` when investigating;
+review debug output for private data before sharing it.
 
 ---
 
@@ -498,6 +571,10 @@ That covers brains, cortex, chunking, search, the graph, CLI workflows, material
 follow-up edits, and meeting sync round trips/conflict handling. AI responses are mocked;
 the suite does **not** call WhisperKit or a live LLM. If ffmpeg is installed, a smoke test
 uses it to convert a short generated tone. All test data stays in temporary directories.
+The CLI contract suite also checks every command's help, strict argument rejection,
+caller-relative paths, JSON output, safe config edits, and data-directory isolation.
+CI additionally installs a wheel into a clean environment and tests a bundled Mac
+executable outside the checkout. See the distribution guide for local build checks.
 
 iOS unit tests:
 

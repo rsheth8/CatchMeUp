@@ -1,0 +1,15 @@
+include LICENSE README.md pyproject.toml catchup watch_and_process.sh
+include docs/CLI_DISTRIBUTION.md
+include docs/releases/cli-0.2.0.md
+recursive-include packaging *.py *.spec
+recursive-include tests *.py
+prune ios
+prune brains
+prune recordings
+prune processed
+prune logs
+prune output
+prune GraphQL-Crash-Course
+prune MIT-6.0001
+prune MIT-6.0002
+global-exclude .env .env.* *.pyc .DS_Store

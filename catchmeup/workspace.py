@@ -167,8 +167,14 @@ def dashboard(audience: str = "all") -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="./catchup", description="Local-first study and work tools. No API key needed for these commands.")
+    p = argparse.ArgumentParser(prog="catchup", description="Local-first study and work tools. No API key needed for these commands.", allow_abbrev=False)
     commands = p.add_subparsers(dest="command", required=True)
+    add_commands(commands)
+    return p
+
+
+def add_commands(commands):
+    """Register with both the public CLI and the legacy module entry point."""
     today = commands.add_parser("today", help="Overview of courses and work projects")
     today.add_argument("--audience", choices=["all", "student", "work"], default="all")
     for name in ("prepare", "review"):
@@ -187,12 +193,15 @@ def parser() -> argparse.ArgumentParser:
     docs.add_argument("action", choices=["list", "add", "show", "search"], nargs="?", default="list")
     docs.add_argument("values", nargs="*")
     docs.add_argument("--recap", help="Attach to one recap by unique title fragment or folder ID")
-    return p
 
 
 def main(argv=None) -> int:
     p = parser()
     args = p.parse_args(argv)
+    return execute(args)
+
+
+def execute(args) -> int:
     try:
         if args.command == "today":
             print(dashboard(args.audience))

@@ -906,10 +906,8 @@ def auto_push(brain: str | None = None) -> Report | None:
 # ------------------------------------------------------------------------ CLI
 
 
-def main(argv: list[str] | None = None) -> int:
-    import argparse
-
-    parser = argparse.ArgumentParser(prog="catchup sync", description=__doc__)
+def add_arguments(parser):
+    parser.set_defaults(dir=None)
     sub = parser.add_subparsers(dest="action")
 
     parsers = {}
@@ -931,7 +929,14 @@ def main(argv: list[str] | None = None) -> int:
         "--no-audio", action="store_true", help="Skip copying audio into the brain."
     )
 
-    args = parser.parse_args(argv)
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog="catchup sync", description=__doc__, allow_abbrev=False)
+    add_arguments(parser)
+    return execute(parser.parse_args(argv))
+
+
+def execute(args) -> int:
     action = args.action or "status"
 
     try:
@@ -973,7 +978,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  Awaiting notes {report.unprocessed} recording(s) from the phone")
             print(f"  Audio          {report.audio_files} file(s), {human_bytes(report.audio_bytes)}")
     except SyncUnavailable as error:
-        print(str(error))
+        import sys
+        print(str(error), file=sys.stderr)
         return 1
     return 0
 

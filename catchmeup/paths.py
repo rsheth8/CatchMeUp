@@ -1,11 +1,12 @@
 """Where CatchMeUp code lives vs where recaps live.
 
 Code is the `catchmeup` package. User data (brains, recordings, notes, logs)
-lives under CATCHMEUP_HOME, which defaults to the source checkout root.
+lives outside the installed package. Source checkouts keep their existing library.
 """
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -14,7 +15,16 @@ RECORD_NAME = "catchmeup.json"
 
 
 def home() -> Path:
-    return Path(os.environ.get("CATCHMEUP_HOME") or REPO_DIR)
+    override = os.environ.get("CATCHMEUP_HOME")
+    if override:
+        return Path(override).expanduser().resolve()
+    if not getattr(sys, "frozen", False) and (REPO_DIR / ".git").exists() and (REPO_DIR / "catchup").is_file():
+        return REPO_DIR
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "CatchMeUp"
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "CatchMeUp"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "catchmeup"
 
 
 def brains_root() -> Path:
@@ -39,7 +49,8 @@ def recordings_root() -> Path:
 
 def load_env() -> None:
     seen: set[Path] = set()
-    for path in (home() / ".env", REPO_DIR / ".env"):
+    # Never fall back to another library's credentials or load a caller's .env.
+    for path in (home() / ".env",):
         resolved = path.resolve() if path.exists() else path
         if resolved in seen or not path.is_file():
             continue

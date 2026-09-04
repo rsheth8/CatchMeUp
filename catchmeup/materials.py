@@ -37,7 +37,7 @@ def extract(path: Path) -> tuple[list[dict], list[str]]:
         try:
             from pypdf import PdfReader
         except ImportError as exc:
-            raise ValueError("PDF support needs an update: run ./catchup setup.") from exc
+            raise ValueError("PDF support is missing. Update/reinstall CatchMeUp; source installs: venv/bin/python3 -m pip install -e .") from exc
         from pypdf.errors import PdfReadError
         try:
             reader = PdfReader(path)

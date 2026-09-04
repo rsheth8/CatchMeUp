@@ -17,7 +17,7 @@ Two things are **not**, because they're yours and not the repo's:
 | What | Where | Note |
 |---|---|---|
 | Team ID | `DEVELOPMENT_TEAM` in `project.yml`, or the command line | Left blank on purpose — see below |
-| Bundle IDs | `com.catchmeup.app`, `.widgets`, and the iCloud container | Must exist in your developer account, with iCloud and Push capabilities on the app ID |
+| Bundle IDs | `com.catchmeup.app`, `.widgets`, and the iCloud container | The app ID needs the iCloud capability. Automatic signing creates `.widgets` itself; the iCloud container is the one thing you make by hand |
 
 The iCloud container `iCloud.com.catchmeup.app` has to be created in the
 developer portal before a signed build will install, or sync silently does

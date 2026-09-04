@@ -348,14 +348,14 @@ final class ProcessingQueue {
         }
         recording.processingError = nil
 
-        store.upsert(recording)
+        store.upsert(withCurrentAudio(recording))
         await liveActivity.start(for: recording, phase: rewriteOnly ? .writing(0) : .transcribing(0))
 
         if !rewriteOnly {
             do {
                 recording = try await transcribe(recording)
                 recording.meeting = store.recording(recordingID)?.meeting
-                store.upsert(recording)
+                store.upsert(withCurrentAudio(recording))
             } catch is CancellationError {
                 markParked(recordingID)
                 return
@@ -378,7 +378,7 @@ final class ProcessingQueue {
         do {
             recording = try await writeNotes(recording)
             recording.meeting?.preserveUserChanges(from: store.recording(recordingID)?.meeting)
-            store.upsert(recording)
+            store.upsert(withCurrentAudio(recording))
             finish(recordingID, recording)
         } catch is CancellationError {
             markParked(recordingID)
@@ -555,11 +555,39 @@ final class ProcessingQueue {
         forget(recordingID, after: 2.5)
     }
 
+    /// Re-reads the fields that describe *where the audio is* from the store.
+    ///
+    /// A job carries a `Recording` value from the moment it started, but the
+    /// audio optimizer can re-encode and rename that file while the job runs —
+    /// `<id>.mp4` becomes `<id>.m4a`, and the old file is deleted. That rename
+    /// lands in the store, not in this snapshot, and `upsert` replaces the
+    /// whole record. Writing the snapshot back therefore resurrects a filename
+    /// that no longer exists on disk, which strands the real audio: playback
+    /// and re-runs fail with "no audio", and deleting the recap leaves the file
+    /// behind because it looks for the wrong name.
+    ///
+    /// Everything else on the record still belongs to the job — only the file's
+    /// identity belongs to the optimizer.
+    private func withCurrentAudio(_ recording: Recording) -> Recording {
+        guard let latest = store.recording(recording.id) else { return recording }
+        var r = recording
+        r.audioFilename = latest.audioFilename
+        r.audioBytes = latest.audioBytes
+        r.audioCodec = latest.audioCodec
+        r.audioBitRate = latest.audioBitRate
+        r.audioSampleRate = latest.audioSampleRate
+        r.audioChannels = latest.audioChannels
+        r.audioRemoved = latest.audioRemoved
+        r.keepAudioDownloaded = latest.keepAudioDownloaded
+        r.optimizeFailed = latest.optimizeFailed
+        return r
+    }
+
     private func fail(_ recordingID: UUID, _ recording: Recording, _ message: String) {
         PendingJobs.remove(recordingID)
         var recording = recording
         recording.processingError = message
-        store.upsert(recording)
+        store.upsert(withCurrentAudio(recording))
 
         update(recordingID) { job in
             job.phase = .failed(message)

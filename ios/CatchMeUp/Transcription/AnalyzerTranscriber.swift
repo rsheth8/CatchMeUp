@@ -117,17 +117,54 @@ struct AnalyzerTranscriber: Transcriber {
         case .unsupported:
             throw TranscriptionError.recognizerUnavailable
         case .supported, .downloading:
-            guard let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) else {
-                break
+            // A nil request means the system is already installing this model
+            // for someone else. The download is real either way, so the answer
+            // is to wait for it below rather than to carry on without it.
+            if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
+                try await request.downloadAndInstall()
             }
-            try await request.downloadAndInstall()
         @unknown default:
             break
         }
+
+        try await waitForModel(module)
 
         // Reserving keeps the system from reclaiming the model between recaps.
         // There is a cap on reservations, and being over it is not an error
         // worth failing a transcription for.
         _ = try? await AssetInventory.reserve(locale: locale)
+    }
+
+    /// Confirms the model is genuinely installed before any audio is fed in.
+    ///
+    /// This matters more than it looks. `SpeechAnalyzer` does not fail when its
+    /// model is missing — it simply produces no results, which reaches the user
+    /// as "No speech was found in this recording" on a recording that is full
+    /// of speech. The first recap on a new phone is exactly when the model is
+    /// least likely to be ready, so the wait is worth making explicit and the
+    /// giving-up point is worth naming.
+    private static func waitForModel(_ module: SpeechTranscriber) async throws {
+        let deadline = ContinuousClock.now + .seconds(180)
+        while true {
+            switch await AssetInventory.status(forModules: [module]) {
+            case .installed:
+                return
+            case .unsupported:
+                throw TranscriptionError.recognizerUnavailable
+            case .downloading:
+                guard ContinuousClock.now < deadline else { throw modelNotReady }
+                try await Task.sleep(for: .seconds(2))
+            case .supported:
+                // Installation ran and left nothing behind; waiting won't help.
+                throw modelNotReady
+            @unknown default:
+                return
+            }
+        }
+    }
+
+    private static var modelNotReady: TranscriptionError {
+        .failed("the on-device speech model hasn't finished downloading. "
+                + "It keeps going in the background — try again in a minute.")
     }
 }

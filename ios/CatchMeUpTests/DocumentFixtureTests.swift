@@ -29,7 +29,14 @@ final class DocumentFixtureTests: XCTestCase {
         // its entries — slide10 must never sort between slide1 and slide2.
         XCTAssertEqual(pages.map(\.number), [1, 2, 3, 4, 5])
 
+        // Slide 1's heading is one paragraph broken across two lines with
+        // `a:br` — what you get from Shift+Return, and what used to come back
+        // as just "Environment".
         XCTAssertEqual(pages[0].title, "Environment Diagrams")
+        // Slide 2's heading is a real title placeholder spanning two
+        // paragraphs. Only the placeholder says the second one is still the
+        // title; guessing from the first line cannot get this right.
+        XCTAssertEqual(pages[1].title, "What a frame is and why it has a parent")
         XCTAssertTrue(pages[3].text.contains("make_adder"),
                       "Slide 4 body should carry the worked example verbatim")
 
@@ -80,6 +87,12 @@ final class DocumentFixtureTests: XCTestCase {
         XCTAssertTrue(pages.allSatisfy { $0.thumbnail != nil })
         XCTAssertTrue(pages.allSatisfy { $0.text.count > 200 },
                       "A text-layer PDF should never fall through to OCR")
+
+        // Page 1's heading wraps onto a second line. Reading it off the type
+        // size keeps it whole; reading the first line alone cut it at "and".
+        XCTAssertTrue(pages[0].title.localizedCaseInsensitiveContains("closures"),
+                      "Wrapped heading was truncated: \(pages[0].title)")
+        XCTAssertFalse(pages[0].title.hasSuffix("and"))
     }
 
     // MARK: - Scanned PDF, no text layer

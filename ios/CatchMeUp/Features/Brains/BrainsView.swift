@@ -60,10 +60,20 @@ struct BrainsView: View {
 
         LazyVGrid(columns: columns, spacing: 12) {
             if split {
-                sectionLabel(Mode.lecture.brainKindSection)
-                ForEach(courses) { brainCard($0) }
-                sectionLabel(Mode.meeting.brainKindSection)
-                ForEach(work) { brainCard($0) }
+                // A header is the only thing LazyVGrid lays out across the full
+                // width. Emitting the label as a plain child makes it a cell —
+                // it takes the first column and shoves the first card into the
+                // second, leaving a hole where a card should be.
+                Section {
+                    ForEach(courses) { brainCard($0) }
+                } header: {
+                    sectionLabel(Mode.lecture.brainKindSection)
+                }
+                Section {
+                    ForEach(work) { brainCard($0) }
+                } header: {
+                    sectionLabel(Mode.meeting.brainKindSection)
+                }
             } else {
                 ForEach(store.visibleBrains) { brainCard($0) }
             }
@@ -77,7 +87,7 @@ struct BrainsView: View {
             .tracking(1.1)
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .gridCellColumns(2)
+            .padding(.top, 4)
     }
 
     private func brainCard(_ brain: Brain) -> some View {

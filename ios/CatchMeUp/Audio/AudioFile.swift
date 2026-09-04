@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreMedia
 
 // MARK: - What a file on disk actually is
@@ -213,36 +213,41 @@ enum AudioTranscoder {
         progress: (@Sendable (Double) -> Void)?
     ) async throws {
         let queue = DispatchQueue(label: "com.catchmeup.transcode")
-        let once = Once()
+        // AVFoundation's writer/reader types predate Swift concurrency. They
+        // are deliberately confined to this one serial queue; wrapping them
+        // as one transfer object makes that ownership explicit and prevents a
+        // future Swift language-mode upgrade from turning imports into errors.
+        let context = AudioPumpContext(output: output, reader: reader,
+                                       input: input, writer: writer)
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                input.requestMediaDataWhenReady(on: queue) {
+                context.input.requestMediaDataWhenReady(on: queue) {
                     // A writer that has already failed stops asking for data, so
                     // without this the continuation would never resume.
-                    if writer.status == .failed {
-                        if once.claim() {
-                            input.markAsFinished()
-                            let why = writer.error?.localizedDescription ?? "the writer failed"
+                    if context.writer.status == .failed {
+                        if context.once.claim() {
+                            context.input.markAsFinished()
+                            let why = context.writer.error?.localizedDescription ?? "the writer failed"
                             continuation.resume(throwing: Failure.unwritable(why))
                         }
                         return
                     }
-                    while input.isReadyForMoreMediaData {
+                    while context.input.isReadyForMoreMediaData {
                         if Task.isCancelled {
-                            if once.claim() {
-                                input.markAsFinished()
+                            if context.once.claim() {
+                                context.input.markAsFinished()
                                 continuation.resume(throwing: CancellationError())
                             }
                             return
                         }
-                        guard let sample = output.copyNextSampleBuffer() else {
-                            if once.claim() {
-                                input.markAsFinished()
+                        guard let sample = context.output.copyNextSampleBuffer() else {
+                            if context.once.claim() {
+                                context.input.markAsFinished()
                                 // A failed read also returns nil, which would
                                 // otherwise pass for a clean end of stream and
                                 // silently truncate the recording.
-                                if reader.status == .failed {
-                                    let why = reader.error?.localizedDescription
+                                if context.reader.status == .failed {
+                                    let why = context.reader.error?.localizedDescription
                                         ?? "the source couldn't be read to the end"
                                     continuation.resume(throwing: Failure.unreadable(why))
                                 } else {
@@ -256,10 +261,10 @@ enum AudioTranscoder {
                             let at = CMSampleBufferGetPresentationTimeStamp(sample).seconds
                             if at.isFinite { progress(min(1, max(0, at / totalDuration))) }
                         }
-                        guard input.append(sample) else {
-                            if once.claim() {
-                                input.markAsFinished()
-                                let why = writer.error?.localizedDescription ?? "the writer rejected a sample"
+                        guard context.input.append(sample) else {
+                            if context.once.claim() {
+                                context.input.markAsFinished()
+                                let why = context.writer.error?.localizedDescription ?? "the writer rejected a sample"
                                 continuation.resume(throwing: Failure.unwritable(why))
                             }
                             return
@@ -268,7 +273,7 @@ enum AudioTranscoder {
                 }
             }
         } onCancel: {
-            queue.async { input.markAsFinished() }
+            queue.async { context.input.markAsFinished() }
         }
     }
 }
@@ -288,6 +293,25 @@ final class Once: @unchecked Sendable {
         if claimed { return false }
         claimed = true
         return true
+    }
+}
+
+/// All non-Sendable AVFoundation objects used by one encode. Access is
+/// serialized by `AudioTranscoder.pump`; the box exists to document and
+/// enforce that transfer boundary in one place.
+private final class AudioPumpContext: @unchecked Sendable {
+    let output: AVAssetReaderOutput
+    let reader: AVAssetReader
+    let input: AVAssetWriterInput
+    let writer: AVAssetWriter
+    let once = Once()
+
+    init(output: AVAssetReaderOutput, reader: AVAssetReader,
+         input: AVAssetWriterInput, writer: AVAssetWriter) {
+        self.output = output
+        self.reader = reader
+        self.input = input
+        self.writer = writer
     }
 }
 

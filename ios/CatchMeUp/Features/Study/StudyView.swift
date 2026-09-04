@@ -250,7 +250,9 @@ struct StudyView: View {
             VStack(alignment: .leading, spacing: 9) {
                 IconTile(symbol: mode.symbol, tint: tint, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(mode.title).font(.subheadline.weight(.semibold))
+                    Text(mode.title)
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(mode.blurb)
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -281,7 +283,9 @@ struct StudyView: View {
             VStack(alignment: .leading, spacing: 9) {
                 IconTile(symbol: "timer", tint: .mint, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Focus session").font(.subheadline.weight(.semibold))
+                    Text("Focus session")
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("\(settings.focusMinutes) minutes, one course at a time")
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

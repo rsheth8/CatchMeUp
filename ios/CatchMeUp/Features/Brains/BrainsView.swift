@@ -104,13 +104,26 @@ struct BrainsView: View {
             BrainCard(brain: brain,
                       recapCount: store.recordings(inBrain: brain.id).count,
                       materialCount: materials.materials(inBrain: brain.id).count)
+                .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(brain.name)
+        .accessibilityValue(brainAccessibilityValue(brain))
         .contextMenu {
             Button(role: .destructive) {
                 withAnimation(.quick) { store.delete(brain) }
             } label: { Label("Delete brain", systemImage: "trash") }
         }
+    }
+
+    private func brainAccessibilityValue(_ brain: Brain) -> String {
+        let recapCount = store.recordings(inBrain: brain.id).count
+        let materialCount = materials.materials(inBrain: brain.id).count
+        let recaps = "\(recapCount) recap\(recapCount == 1 ? "" : "s")"
+        let sources = materialCount > 0
+            ? "\(recaps), \(materialCount) material\(materialCount == 1 ? "" : "s")"
+            : recaps
+        return "\(sources), \(brain.mode.brainKindTitle)"
     }
 
     private var newBrainSheet: some View {
@@ -166,7 +179,9 @@ struct BrainCard: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
+                    .padding(.vertical, 1)
                 Text(sourceCount)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -594,6 +609,8 @@ struct BrainDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityLabel("Send question")
+                .accessibilityIdentifier("brain.send")
                 .opacity(question.trimmingCharacters(in: .whitespaces).isEmpty && !asking ? 0.4 : 1)
                 .animation(.quick, value: asking)
             }

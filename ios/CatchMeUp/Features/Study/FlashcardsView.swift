@@ -127,6 +127,7 @@ struct FlashcardsView: View {
         .onTapGesture { flip() }
         .gesture(swipe(item))
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("flashcard.card")
         .accessibilityLabel(flipped ? "Answer. \(item.revealText)" : "Card. \(item.prompt)")
         .accessibilityHint(flipped ? "Swipe left if still learning, right if you got it"
                                    : "Double tap to turn the card over")

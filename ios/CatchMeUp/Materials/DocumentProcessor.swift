@@ -77,9 +77,9 @@ enum DocumentProcessor {
     }
 
     private static func extractPPTX(_ url: URL) throws -> [ExtractedMaterialPage] {
-        guard let archive = try? Archive(url: url, accessMode: .read) else {
-            throw DocumentProcessingError.unreadable
-        }
+        let archive: Archive
+        do { archive = try Archive(url: url, accessMode: .read, pathEncoding: nil) }
+        catch { throw DocumentProcessingError.unreadable }
         let slideEntries = archive.filter {
             $0.path.range(of: #"^ppt/slides/slide\d+\.xml$"#, options: .regularExpression) != nil
         }.sorted { slideNumber($0.path) < slideNumber($1.path) }

@@ -1,4 +1,4 @@
-import Foundation
+@preconcurrency import Foundation
 import Observation
 
 // MARK: - Where a recording's audio is right now
@@ -160,6 +160,7 @@ final class AudioStorage {
     private var pendingDownloads: Set<String> = []
 
     private let localRoot: URL
+    private let allowsCloud: Bool
     /// The query lives outside actor isolation so it can be torn down in
     /// `deinit`, which isn't allowed to touch main-actor state.
     private let queries = QueryBox()
@@ -171,8 +172,9 @@ final class AudioStorage {
         var bytes: Int64
     }
 
-    init(localRoot: URL) {
+    init(localRoot: URL, allowsCloud: Bool = true) {
         self.localRoot = localRoot
+        self.allowsCloud = allowsCloud
         try? FileManager.default.createDirectory(at: localDirectory, withIntermediateDirectories: true)
     }
 
@@ -190,7 +192,7 @@ final class AudioStorage {
     }
 
     var cloudDirectory: URL? {
-        CloudSync.documentsURL?.appendingPathComponent(Self.folderName, isDirectory: true)
+        allowsCloud ? CloudSync.documentsURL?.appendingPathComponent(Self.folderName, isDirectory: true) : nil
     }
 
     /// Both possible homes, active one first. Looking in both means a half-
@@ -204,6 +206,7 @@ final class AudioStorage {
     }
 
     func setCloudBacked(_ enabled: Bool) {
+        guard allowsCloud else { return }
         guard enabled != isCloudBacked else { return }
         isCloudBacked = enabled
         cloudItems.removeAll()
@@ -507,11 +510,12 @@ final class AudioStorage {
             NSMetadataUbiquitousItemPercentDownloadedKey,
             NSMetadataItemFSSizeKey,
         ]
+        let query = MetadataQueryReference(q)
         for name: NSNotification.Name in [.NSMetadataQueryDidUpdate, .NSMetadataQueryDidFinishGathering] {
             let token = NotificationCenter.default.addObserver(
                 forName: name, object: q, queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.absorb(q) }
+                Task { @MainActor in self?.absorb(query.value) }
             }
             queries.tokens.append(token)
         }
@@ -543,6 +547,14 @@ final class AudioStorage {
         }
         if found != cloudItems { cloudItems = found }
     }
+}
+
+/// `NSMetadataQuery` is an Objective-C class without Sendable annotations.
+/// Notifications are delivered on the main queue and `absorb` is MainActor-
+/// isolated, so this reference never crosses into concurrent access.
+private final class MetadataQueryReference: @unchecked Sendable {
+    let value: NSMetadataQuery
+    init(_ value: NSMetadataQuery) { self.value = value }
 }
 
 /// Owns the `NSMetadataQuery` and its observers so they can be released when

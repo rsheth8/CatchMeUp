@@ -170,4 +170,33 @@ final class QuestionMintTests: XCTestCase {
         ]))
         XCTAssertEqual(items.filter { $0.kind == .term }.count, 1)
     }
+
+    func testClozeRevealRestoresTheAnswerInContext() {
+        let item = StudyItem(
+            recordingID: UUID(),
+            brainID: nil,
+            sourceTitle: "Launch readiness",
+            kind: .cloze,
+            prompt: "Fill the blank — rollout plan:\n\nStart with a small ______ cohort before the full release.",
+            answer: "internal"
+        )
+
+        XCTAssertEqual(
+            item.revealText,
+            "Start with a small **internal** cohort before the full release."
+        )
+    }
+
+    func testNonClozeRevealRemainsTheStoredAnswer() {
+        let item = StudyItem(
+            recordingID: UUID(),
+            brainID: nil,
+            sourceTitle: "Algorithms",
+            kind: .term,
+            prompt: "What is a graph?",
+            answer: "A set of vertices connected by edges."
+        )
+
+        XCTAssertEqual(item.revealText, item.answer)
+    }
 }

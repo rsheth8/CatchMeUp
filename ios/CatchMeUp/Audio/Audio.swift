@@ -109,7 +109,7 @@ final class AudioRecorder: NSObject {
                 do {
                     let session = AVAudioSession.sharedInstance()
                     try session.setCategory(.playAndRecord, mode: .default,
-                                            options: [.defaultToSpeaker, .allowBluetooth])
+                                            options: [.defaultToSpeaker, .allowBluetoothHFP])
                     try session.setActive(true)
 
                     // Some routes refuse the reduced sample rate. Falling back

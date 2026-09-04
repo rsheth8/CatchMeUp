@@ -89,8 +89,15 @@ struct StudyItem: Codable, Identifiable, Hashable {
     var isDue: Bool { !suspended && !deleted && memory.due <= .now }
     var isNew: Bool { memory.isNew }
 
-    /// Answer text with the cloze blank filled back in, for the reveal.
-    var revealText: String { answer }
+    /// Answer text with the cloze blank filled back in, for the reveal. Keeping
+    /// the sentence around a cloze answer makes the back of the card useful —
+    /// a lone word is hard to connect to the question the learner just saw.
+    var revealText: String {
+        guard kind == .cloze, prompt.contains("______") else { return answer }
+
+        let exercise = prompt.components(separatedBy: "\n\n").last ?? prompt
+        return exercise.replacingOccurrences(of: "______", with: "**\(answer)**")
+    }
 
     init(recordingID: UUID, materialID: UUID? = nil, brainID: UUID?, sourceTitle: String, timestamp: Double? = nil,
          kind: StudyItemKind, prompt: String, answer: String, keys: [String] = [],

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/brand/logo.png" width="168" alt="CatchMeUp constellation C">
+  <img src="docs/brand/logo.png" width="96" alt="CatchMeUp">
 </p>
 
 <h1 align="center">CatchMeUp</h1>

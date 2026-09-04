@@ -146,6 +146,12 @@ Use `./catchup help materials`, `help tasks`, or `help today` for command option
 | Organize | `today`, `review`, `prepare`, `tasks`, `materials` | Materials, meeting workspace, follow-ups |
 | Explore | `ask`, `exam`, `clip`, `think`, `cortex`, `sync` | Exam, Clip, Ask, player, iCloud |
 
+**iPhone showcase:** In Settings, select **Demo** or **Explore the showcase account**
+to try a separate, populated student/work library without an API key. It includes 12
+narrated recaps, playable moments, four brains, documents, meeting follow-ups, and a
+sample study history. Demo chat matches local sources; it is not live AI generation.
+Your personal library and provider settings stay separate. [Showcase details](ios/README.md#show-the-app-without-an-api-key).
+
 ```bash
 ./catchup lecture ~/Downloads/week3.mp4
 ./catchup sync push         # send recaps to the shared folder

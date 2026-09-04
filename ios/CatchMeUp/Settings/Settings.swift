@@ -71,7 +71,7 @@ enum EngineKind: String, CaseIterable, Identifiable {
 
     var blurb: String {
         switch self {
-        case .demo: return "Uses a built-in sample recap. No account, nothing sent anywhere — good for a first look."
+        case .demo: return "Explore a populated showcase account: narrated recaps, study practice, meetings, and local source-based answers. No API key needed."
         case .onDevice: return "Apple Intelligence writes the notes right on this iPhone. Free, private, needs iOS 26. Long recordings are covered in several passes, so they take longer."
         case .apiKey: return "Bring a key from Anthropic, OpenAI, Gemini, Groq, Ollama, or any OpenAI-compatible service."
         }
@@ -85,7 +85,10 @@ enum EngineKind: String, CaseIterable, Identifiable {
 final class AppSettings {
     /// Shared for the same reason as `LibraryStore.shared`: background work
     /// needs to know which engine to use without a view being on screen.
-    static let shared = AppSettings()
+    private static let personal = AppSettings()
+    private static let showcase = AppSettings(defaults: ShowcaseSession.defaults, isShowcase: true)
+    static var shared: AppSettings { ShowcaseSession.shared.isActive ? showcase : personal }
+    let isShowcase: Bool
 
     var hasOnboarded: Bool { didSet { d.set(hasOnboarded, forKey: "hasOnboarded") } }
     var engineKind: EngineKind { didSet { d.set(engineKind.rawValue, forKey: "engineKind") } }
@@ -141,15 +144,17 @@ final class AppSettings {
 
     /// Kept in the Keychain, not UserDefaults.
     var apiKey: String {
-        didSet { Keychain.set(apiKey, for: "apiKey") }
+        didSet { if !isShowcase { Keychain.set(apiKey, for: "apiKey") } }
     }
 
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
 
-    init() {
-        let dd = UserDefaults.standard
-        hasOnboarded = dd.bool(forKey: "hasOnboarded")
-        engineKind = EngineKind(rawValue: dd.string(forKey: "engineKind") ?? "") ?? .demo
+    init(defaults: UserDefaults = .standard, isShowcase: Bool = false) {
+        self.isShowcase = isShowcase
+        d = defaults
+        let dd = defaults
+        hasOnboarded = isShowcase || dd.bool(forKey: "hasOnboarded")
+        engineKind = isShowcase ? .demo : (EngineKind(rawValue: dd.string(forKey: "engineKind") ?? "") ?? .demo)
         providerID = dd.string(forKey: "providerID") ?? "anthropic"
         model = dd.string(forKey: "model") ?? Providers.by(dd.string(forKey: "providerID") ?? "anthropic").defaultModel
         customBaseURL = dd.string(forKey: "customBaseURL") ?? ""
@@ -175,7 +180,7 @@ final class AppSettings {
         reviewReminder = dd.object(forKey: "reviewReminder") as? Bool ?? true
         reviewReminderHour = dd.object(forKey: "reviewReminderHour") as? Int ?? 18
         prequestions = dd.object(forKey: "prequestions") as? Bool ?? true
-        apiKey = Keychain.get("apiKey") ?? ""
+        apiKey = isShowcase ? "" : (Keychain.get("apiKey") ?? "")
     }
 
     /// Scheduler configuration assembled from the user's settings.
@@ -201,6 +206,7 @@ final class AppSettings {
     }
 
     var providerConfig: ProviderConfig {
+        if isShowcase { return ProviderConfig(kind: .anthropic, baseURL: nil, model: "demo", apiKey: "") }
         let p = provider
         let base = customBaseURL.isEmpty ? p.baseURL : customBaseURL
         return ProviderConfig(kind: p.kind, baseURL: base, model: model, apiKey: apiKey)
@@ -219,7 +225,7 @@ final class AppSettings {
 
     var readinessHint: String {
         switch engineKind {
-        case .demo: return "Ready — recaps use built-in sample text."
+        case .demo: return "Ready — narrated samples and local source matching, with no AI request."
         case .onDevice:
             return FoundationBridge.availabilityText
         case .apiKey:

@@ -34,7 +34,11 @@ struct CatchMeUpApp: App {
                 .fontDesign(.rounded)
                 .tint(.brand)
                 .task { await houseKeeping() }
+                .fullScreenCover(isPresented: Bindable(ShowcaseSession.shared).isActive) {
+                    ShowcaseView()
+                }
                 .onChange(of: scenePhase) { _, phase in
+                    guard !ShowcaseSession.shared.isActive else { return }
                     // Coming back to the foreground is the common way a parked
                     // job gets picked up — the scheduled task is the fallback
                     // for when the user doesn't return for a while.
@@ -58,6 +62,7 @@ struct CatchMeUpApp: App {
     /// it will touch audio that isn't backed up. Leftover-file cleanup is
     /// deliberately left to an explicit tap in Settings ▸ Storage.
     private func houseKeeping() async {
+        guard !ShowcaseSession.shared.isActive else { return }
         // Wired before anything else touches the library, so a deletion during
         // startup still takes its questions with it.
         store.studySink = study
@@ -84,6 +89,9 @@ struct CatchMeUpApp: App {
         }
 
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showShowcase") {
+            ShowcaseSession.shared.enter()
+        }
         // A launch route for simulator/UI validation. It is compiled out of
         // release builds and never changes a person's library.
         if ProcessInfo.processInfo.arguments.contains("-showKnowledge"),

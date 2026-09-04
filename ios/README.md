@@ -39,6 +39,31 @@ xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
+### Show the app without an API key
+
+Open **Settings → Explore the showcase account**. This is a separate local library:
+your personal recordings, settings, Keychain credentials, iCloud data, and study history
+are not replaced. Exit returns to your account; app relaunches always start there.
+Finish ongoing processing before switching. Showcase edits persist between visits.
+
+The showcase includes 12 short narrated sessions across Computer Science, Statistics,
+Payments, and Product Studio; timestamp-matched audio and key moments; linked PDFs and
+slides; meeting decisions, blockers, owners and follow-ups; seven days of fictional
+study history; and two upcoming exams. The **Take a tour** banner provides starting points.
+
+Search, playback, documents, neural maps, practice grading, scheduling, task editing,
+and exports use the real app. Brain chat selects relevant source excerpts locally;
+meeting analysis uses deterministic extraction. They are **not live AI generation**.
+Demo capture uses a narrated fixture instead of pretending to transcribe microphone
+audio. Import your own audio in your personal account with a real recap engine selected.
+The showcase does not enable iCloud or automatic study/recap notifications.
+
+Narration assets are fictional, generated locally with macOS `say`, and add about 2 MB.
+To rebuild them after editing `ShowcaseAssets/showcase-source.json`, run
+`python3 ios/tools/build_showcase_audio.py` (requires macOS and FFmpeg).
+Unit tests verify content, audio offsets, local answers, and isolation; UI tests exercise
+the tour, account exit, capture/playback, and source-backed chat in the Simulator.
+
 ### Test with your existing CLI library
 
 Build and launch the app in a Simulator once, then from the repository root run:

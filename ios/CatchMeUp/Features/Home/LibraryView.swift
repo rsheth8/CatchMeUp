@@ -67,11 +67,12 @@ struct LibraryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Haptics.tap()
-                        showImporter = true
+                        if settings.engineKind == .demo { router.recorderMode = settings.defaultMode }
+                        else { showImporter = true }
                     } label: {
                         Image(systemName: "waveform.badge.plus")
                     }
-                    .accessibilityLabel("Add a file")
+                    .accessibilityLabel(settings.engineKind == .demo ? "Add a narrated demo" : "Add a file")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
@@ -146,7 +147,7 @@ struct LibraryView: View {
         .searchable(text: Binding(
             get: { router.libraryQuery },
             set: { router.libraryQuery = $0 }
-        ), prompt: "Search titles and notes")
+        ), prompt: "Search")
         .animation(.quick, value: filter)
     }
 
@@ -165,13 +166,22 @@ struct LibraryView: View {
                             Haptics.tap()
                             router.libraryPath.append(line.recordingID)
                         } label: {
-                            Label(line.text, systemImage: line.symbol)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
+                            HStack(alignment: .top, spacing: 7) {
+                                Image(systemName: line.symbol)
+                                    .frame(width: 14)
+                                Text(line.text)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.vertical, 1)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(line.text)
                     }
                 }
                 .padding(12)
@@ -529,7 +539,9 @@ struct RecapRow: View {
                 if let eta = job.etaSeconds { parts.append("\(etaText(eta)) remaining") }
             }
         } else if recording.needsAttention {
-            parts.append("Couldn't finish the notes. Tap to retry.")
+            parts.append(recording.segments.isEmpty
+                ? "Transcription needs another try. Your audio is saved."
+                : "Notes need another try. Your transcript is saved.")
         } else if !recording.isProcessed {
             parts.append("Waiting to start")
         } else if let gist = recording.recap?.tldr?.first, !gist.isEmpty {
@@ -617,7 +629,10 @@ struct RecapRow: View {
         if let job, !job.phase.isFinished {
             liveProgress(job)
         } else if recording.needsAttention {
-            Label("Couldn't finish the notes — tap to retry", systemImage: "exclamationmark.triangle.fill")
+            Label(recording.segments.isEmpty
+                  ? "Transcription needs another try — tap to retry"
+                  : "Notes need another try — tap to retry",
+                  systemImage: "exclamationmark.triangle.fill")
                 .font(.subheadline)
                 .foregroundStyle(.orange)
                 .lineLimit(2)

@@ -101,6 +101,7 @@ extension RecapEngine {
 enum RecapEngineFactory {
     @MainActor
     static func make(_ settings: AppSettings) -> RecapEngine {
+        if settings.isShowcase { return MockRecapEngine() }
         switch settings.engineKind {
         case .demo:
             return MockRecapEngine()
@@ -133,41 +134,28 @@ struct MockRecapEngine: RecapEngine {
     var contextBudget: Int { RecapBudget.cloudContext }
 
     func respond(system: String, user: String, maxTokens: Int) async throws -> String {
-        throw EngineError.onDeviceUnavailable("Demo mode doesn't call a model.")
+        try Task.checkCancellation()
+        return "Demo uses local source matching. Open a brain to ask about its recaps and materials."
     }
 
-    /// Walks the same progress curve a real run does, so the processing UI can
-    /// be developed and demoed without a key.
     func makeRecap(
         transcript: String, mode: Mode, progress: @escaping (Double) -> Void
     ) async throws -> Recap {
         for step in 1...4 {
-            try await Task.sleep(nanoseconds: 250_000_000)
+            try await Task.sleep(for: .milliseconds(250))
             progress(Double(step) / 4)
         }
-        return mode == .lecture ? SampleData.lectureRecap : SampleData.meetingRecap
+        return DemoResponses.recap(transcript: transcript, mode: mode)
     }
 
-    /// Written as Markdown so Demo mode shows the real answer layout.
     func answer(question: String, persona: String, context: RetrievedContext) async throws -> String {
-        try await Task.sleep(nanoseconds: 1_400_000_000)
-        return """
-        Demo mode doesn't call a model, so here's what a real answer looks like.
+        try await Task.sleep(for: .milliseconds(450))
+        return DemoResponses.answer(question: question, context: context)
+    }
 
-        ## Where answers come from
-        - **Your recaps only** — the model sees passages retrieved from this brain, nothing else.
-        - **Ranked, not the first twelve** — the notes and transcript lines closest to your \
-        question are the ones that get sent.
-        - **Cited** — every answer names the recaps it leaned on, and you can tap through to them.
-
-        ## Turning it on
-        Open **Settings ▸ Recap engine** and pick either:
-
-        1. *On-device* — Apple's model, needs iOS 26 and Apple Intelligence.
-        2. *Your API key* — Anthropic or any OpenAI-compatible endpoint.
-
-        > Audio and transcripts never leave the device on the on-device path.
-        """
+    func extractMeeting(transcript: String, documents: String, agenda: String) async throws -> MeetingExtraction {
+        try Task.checkCancellation()
+        return DemoResponses.meeting(transcript: transcript)
     }
 }
 

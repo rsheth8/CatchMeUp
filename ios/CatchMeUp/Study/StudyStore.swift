@@ -29,7 +29,10 @@ final class StudyStore: StudyItemSink {
     /// One bank per process, for the same reason as `LibraryStore.shared`: a
     /// recap can finish in a `BGProcessingTask` with no view tree anywhere, and
     /// its questions have to be written by whoever finishes it.
-    static let shared = StudyStore()
+    private static let personal = StudyStore()
+    private static let showcase = StudyStore(root: ShowcaseSession.root, isShowcase: true)
+    static var shared: StudyStore { ShowcaseSession.shared.isActive ? showcase : personal }
+    let isShowcase: Bool
 
     /// Includes tombstones; use the filtered accessors.
     private(set) var items: [StudyItem] = []
@@ -48,9 +51,10 @@ final class StudyStore: StudyItemSink {
     /// every stat in the app. Cap it so a heavy user's file stays sane.
     private let maxLogs = 20_000
 
-    init() {
+    init(root: URL? = nil, isShowcase: Bool = false) {
+        self.isShowcase = isShowcase
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        localDir = support.appendingPathComponent("CatchMeUp", isDirectory: true)
+        localDir = root ?? support.appendingPathComponent("CatchMeUp", isDirectory: true)
         try? FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
         load()
     }
@@ -61,7 +65,7 @@ final class StudyStore: StudyItemSink {
     // any time, and this has to follow `LibraryStore` to the same folder.
 
     private var dataDir: URL {
-        if UserDefaults.standard.bool(forKey: "iCloudSync"), let cloud = CloudSync.documentsURL {
+        if !isShowcase, UserDefaults.standard.bool(forKey: "iCloudSync"), let cloud = CloudSync.documentsURL {
             return cloud
         }
         return localDir
@@ -372,6 +376,29 @@ final class StudyStore: StudyItemSink {
     }
 
     // MARK: - Recording a review
+
+    /// Fictional history only in the isolated showcase, to make trends and due
+    /// reviews explorable on first entry. Never reseeds over a visitor's work.
+    func seedShowcaseHistory() {
+        guard isShowcase, logs.isEmpty, !items.isEmpty else { return }
+        for day in (1...7).reversed() {
+            let date = Date().addingTimeInterval(-Double(day) * 86400)
+            for index in items.indices.prefix(8) {
+                let correct = (index + day) % 4 != 0
+                let grade: FSRS.Grade = correct ? .good : .again
+                let wasNew = items[index].isNew
+                items[index].memory = FSRS.schedule(items[index].memory, grade: grade, now: date)
+                var log = ReviewLog(itemID: items[index].id, brainID: items[index].brainID,
+                                    grade: grade, confidence: correct ? .fairly : .certain,
+                                    correct: correct, secondsSpent: 18, typed: "Showcase practice",
+                                    sessionID: nil, wasNew: wasNew)
+                log.reviewedAt = date
+                logs.append(log)
+            }
+        }
+        saveItems()
+        saveLogs()
+    }
 
     /// Applies a grade: updates the schedule, appends the log, saves. Returns
     /// the item's new memory so the caller can show the next interval.

@@ -31,6 +31,9 @@ targets:
     sources:
       - path: CatchMeUp
       - path: Shared
+      - path: ShowcaseAssets
+        excludes:
+          - showcase-source.json
       # Demo documents. Shared with the test target rather than duplicated —
       # the same files are both what the sample library shows off and what the
       # extraction tests run against.
@@ -47,6 +50,7 @@ targets:
     scheme:
       testTargets:
         - CatchMeUpTests
+        - CatchMeUpUITests
 
   CatchMeUpTests:
     type: bundle.unit-test
@@ -60,6 +64,19 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app.tests
         GENERATE_INFOPLIST_FILE: YES
+
+  CatchMeUpUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: CatchMeUpUITests
+    dependencies:
+      - target: CatchMeUp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: CatchMeUp
 
   CatchMeUpWidgets:
     type: app-extension

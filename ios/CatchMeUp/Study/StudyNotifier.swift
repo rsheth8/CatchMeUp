@@ -21,33 +21,38 @@ enum StudyNotifier {
     /// Rewrites the next week of reminders from the current schedule.
     @MainActor
     static func reschedule(study: StudyStore, settings: AppSettings, from now: Date = .now) {
-        let center = UNUserNotificationCenter.current()
-        center.getPendingNotificationRequests { pending in
-            let ours = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
-            center.removePendingNotificationRequests(withIdentifiers: ours)
-        }
-        guard settings.reviewReminder else { return }
-
-        // Provisional authorisation, same as recap-ready notifications: the
-        // first one lands quietly in Notification Center rather than opening
-        // with a permission sheet the user has no context for yet.
+        guard !settings.isShowcase else { return }
+        let reminderIsOn = settings.reviewReminder
         let hour = settings.reviewReminderHour
         let newLimit = settings.dailyNewLimit
-        center.requestAuthorization(options: [.alert, .sound, .badge, .provisional]) { granted, _ in
+
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let pending = await center.pendingNotificationRequests()
+            let ours = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
+            center.removePendingNotificationRequests(withIdentifiers: ours)
+            guard reminderIsOn else { return }
+
+            // Provisional authorisation, same as recap-ready notifications: the
+            // first one lands quietly in Notification Center rather than opening
+            // with a permission sheet the user has no context for yet.
+            let granted = (try? await center.requestAuthorization(
+                options: [.alert, .sound, .badge, .provisional]
+            )) ?? false
             guard granted else { return }
-            Task { @MainActor in
-                let plan = plan(from: now, hour: hour) { day in
-                    study.todayCount(newLimit: newLimit, at: day)
-                }
-                for entry in plan { center.add(entry.request) }
+            let entries = plan(from: now, hour: hour) { day in
+                study.todayCount(newLimit: newLimit, at: day)
             }
+            for entry in entries { try? await center.add(entry.request) }
         }
     }
 
     /// Cancels everything this type scheduled. Used when the toggle goes off.
+    @MainActor
     static func cancelAll() {
-        let center = UNUserNotificationCenter.current()
-        center.getPendingNotificationRequests { pending in
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let pending = await center.pendingNotificationRequests()
             let ours = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
             center.removePendingNotificationRequests(withIdentifiers: ours)
         }

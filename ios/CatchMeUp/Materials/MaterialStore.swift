@@ -5,16 +5,20 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class MaterialStore {
-    static let shared = MaterialStore()
+    private static let personal = MaterialStore()
+    private static let showcase = MaterialStore(root: ShowcaseSession.root, isShowcase: true)
+    static var shared: MaterialStore { ShowcaseSession.shared.isActive ? showcase : personal }
 
     private(set) var materials: [SupplementalMaterial] = []
     private(set) var importError: String?
     private var workers: [UUID: Task<Void, Never>] = [:]
 
     private let root: URL
+    private let isShowcase: Bool
     private let metadataURL: URL
 
-    init(root: URL? = nil) {
+    init(root: URL? = nil, isShowcase: Bool = false) {
+        self.isShowcase = isShowcase
         let support = root ?? FileManager.default.urls(for: .applicationSupportDirectory,
                                                        in: .userDomainMask)[0]
             .appendingPathComponent("CatchMeUp", isDirectory: true)
@@ -123,7 +127,7 @@ final class MaterialStore {
                 materials[index].state = .indexing(0.58)
                 save()
 
-                if let insight = await MaterialIntelligence.analyze(pages: pages),
+                if !isShowcase, let insight = await MaterialIntelligence.analyze(pages: pages),
                    let refreshed = materials.firstIndex(where: { $0.id == id }) {
                     if !insight.summary.isEmpty { materials[refreshed].summary = insight.summary }
                     let semantic = insight.topics.map { topic in

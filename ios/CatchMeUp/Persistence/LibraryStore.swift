@@ -9,7 +9,10 @@ final class LibraryStore {
     /// ever building the view tree, so the background worker needs a way to
     /// reach the library that doesn't go through the environment — and two
     /// instances writing the same `recordings.json` would lose recaps.
-    static let shared = LibraryStore()
+    private static let personal = LibraryStore()
+    private static let showcase = LibraryStore(root: ShowcaseSession.root, isShowcase: true)
+    static var shared: LibraryStore { ShowcaseSession.shared.isActive ? showcase : personal }
+    let isShowcase: Bool
 
     /// Includes tombstones; use the filtered accessors for UI.
     private(set) var recordings: [Recording] = []
@@ -34,15 +37,16 @@ final class LibraryStore {
     private let recordingsName = "recordings.json"
     private let brainsName = "brains.json"
 
-    init() {
+    init(root: URL? = nil, isShowcase: Bool = false) {
+        self.isShowcase = isShowcase
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        localDir = support.appendingPathComponent("CatchMeUp", isDirectory: true)
+        localDir = root ?? support.appendingPathComponent("CatchMeUp", isDirectory: true)
         try? FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
-        audio = AudioStorage(localRoot: localDir)
+        audio = AudioStorage(localRoot: localDir, allowsCloud: !isShowcase)
 
         refreshSyncMode()
         load()
-        SpotlightIndexer.replace(with: recordings)
+        if !isShowcase { SpotlightIndexer.replace(with: recordings) }
 
         appObserverToken = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
@@ -54,13 +58,14 @@ final class LibraryStore {
     // MARK: - Where data lives
 
     var syncEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "iCloudSync") }
+        get { !isShowcase && UserDefaults.standard.bool(forKey: "iCloudSync") }
         set { setSyncEnabled(newValue) }
     }
 
     /// Flipping the toggle now starts a real migration instead of doing a
     /// blocking copy inline — see `migrate(toCloud:)`.
     func setSyncEnabled(_ enabled: Bool) {
+        guard !isShowcase else { return }
         guard enabled != syncEnabled else { return }
         UserDefaults.standard.set(enabled, forKey: "iCloudSync")
         refreshSyncMode()
@@ -363,7 +368,7 @@ final class LibraryStore {
 
     private func saveRecordings() {
         write(recordings, to: recordingsFile)
-        SpotlightIndexer.replace(with: recordings)
+        if !isShowcase { SpotlightIndexer.replace(with: recordings) }
     }
     private func saveBrains() { write(brains, to: brainsFile) }
 
@@ -526,7 +531,7 @@ final class LibraryStore {
         brains = mergedBrains
         write(recordings, to: destination.appendingPathComponent(recordingsName))
         write(brains, to: destination.appendingPathComponent(brainsName))
-        SpotlightIndexer.replace(with: recordings)
+        if !isShowcase { SpotlightIndexer.replace(with: recordings) }
     }
 
     func clearMigrationNotice() {

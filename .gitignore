@@ -45,3 +45,6 @@ MIT-6.0002/
 # CLI distribution outputs (never user libraries)
 build/
 dist/
+
+# Local course downloads (multi-MB video — never commit)
+GraphQL-Crash-Course/

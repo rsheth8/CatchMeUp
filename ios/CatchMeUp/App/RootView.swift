@@ -12,6 +12,13 @@ struct RootView: View {
     /// anything.
     private var dueBadge: Int { study.todayCount(newLimit: settings.dailyNewLimit) }
 
+    private var needsOnboarding: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showShowcase") { return false }
+        #endif
+        return !settings.hasOnboarded && !ShowcaseSession.shared.isActive
+    }
+
     var body: some View {
         @Bindable var router = router
         @Bindable var settings = settings
@@ -21,14 +28,14 @@ struct RootView: View {
             .onOpenURL { router.open($0) }
             .onContinueUserActivity(CatchMeUpLink.recapActivityType) { router.continueActivity($0) }
             .onReceive(NotificationCenter.default.publisher(for: .catchMeUpRouteRequested)) { _ in
-                router.consumePendingRoute()
+                if !ShowcaseSession.shared.isActive { router.consumePendingRoute() }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { router.consumePendingRoute() }
+                if phase == .active, !ShowcaseSession.shared.isActive { router.consumePendingRoute() }
             }
-            .task { router.consumePendingRoute() }
+            .task { if !ShowcaseSession.shared.isActive { router.consumePendingRoute() } }
             .sheet(isPresented: Binding(
-                get: { !settings.hasOnboarded },
+                get: { needsOnboarding },
                 set: { if !$0 { settings.hasOnboarded = true } }
             )) {
                 OnboardingView()
@@ -39,6 +46,15 @@ struct RootView: View {
                 set: { if !$0 { router.recorderMode = nil; router.recorderBrainID = nil; router.recorderRecordingID = nil } }
             )) {
                 if let mode = router.recorderMode {
+                    if settings.engineKind == .demo {
+                        ShowcaseCaptureView(mode: mode, brainID: router.recorderBrainID) { id in
+                            router.recorderMode = nil
+                            router.recorderBrainID = nil
+                            router.recorderRecordingID = nil
+                            router.selectedTab = .library
+                            router.libraryPath.append(id)
+                        }
+                    } else {
                     RecordView(initialMode: mode, brainID: router.recorderBrainID,
                                recordingID: router.recorderRecordingID) { newID in
                         let brainID = router.recorderBrainID
@@ -52,6 +68,7 @@ struct RootView: View {
                             router.selectedTab = .library
                             router.libraryPath.append(newID)
                         }
+                    }
                     }
                 }
             }

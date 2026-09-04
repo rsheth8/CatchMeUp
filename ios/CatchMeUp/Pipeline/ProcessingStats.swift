@@ -75,7 +75,7 @@ enum ProcessingStatsStore {
     }
 
     static func recordWrite(characters: Int, elapsed: Double, engine: EngineKind) {
-        guard characters > 200, elapsed > 0.2 else { return }
+        guard engine != .demo, characters > 200, elapsed > 0.2 else { return }
         let observed = clamp(elapsed / (Double(characters) / 1000), 0.005, 120)
         let current = rates(for: engine)
         UserDefaults.standard.set(blend(current.write, observed), forKey: writeKey(engine))

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(LibraryStore.self) private var store
     @Environment(StudyStore.self) private var study
+    @Environment(AudioOptimizer.self) private var optimizer
 
     /// Non-nil while the feedback share sheet is up; holds the text being sent.
     @State private var feedback: String?
@@ -33,8 +34,14 @@ struct SettingsView: View {
                     ForEach(EngineKind.allCases) { kind in
                         EngineOption(kind: kind, isOn: settings.engineKind == kind) {
                             Haptics.tap()
-                            withAnimation(.quick) { settings.engineKind = kind }
+                            if kind == .demo, !settings.isShowcase {
+                                ShowcaseSession.shared.enter()
+                            } else {
+                                withAnimation(.quick) { settings.engineKind = kind }
+                            }
                         }
+                        .disabled(settings.isShowcase && kind != .demo)
+                        .disabled(kind == .demo && (!ShowcaseSession.shared.canSwitch || optimizer.state.isBusy))
                     }
                 } header: {
                     Text("Who writes the notes")
@@ -66,7 +73,7 @@ struct SettingsView: View {
                                 Label("Get a \(settings.provider.label) key", systemImage: "key.fill")
                             }
                         } footer: {
-                            Text("The key is stored in the iOS Keychain on this device. Only the transcript text is sent to the provider you choose.")
+                            Text("The key is stored in the iOS Keychain on this device. Apple Speech transcribes audio on your phone first; this does not require Apple Intelligence. Your API provider then writes the notes from text, not audio.")
                         }
                     }
                 }
@@ -75,7 +82,7 @@ struct SettingsView: View {
                     Toggle(isOn: Binding(get: { store.syncEnabled }, set: { store.syncEnabled = $0 })) {
                         Label("Sync with iCloud", systemImage: "icloud")
                     }
-                    .disabled(store.migration.isRunning)
+                    .disabled(store.migration.isRunning || settings.isShowcase)
 
                     if store.migration.isRunning {
                         HStack(spacing: 10) {
@@ -180,15 +187,15 @@ struct SettingsView: View {
                 Section {
                     Button {
                         Haptics.tap()
-                        store.seedSampleIfEmpty()
+                        if settings.isShowcase { ShowcaseSession.shared.leave() }
+                        else { ShowcaseSession.shared.enter() }
                     } label: {
-                        Label("Load a sample library", systemImage: "sparkles")
+                        Label(settings.isShowcase ? "Back to my account" : "Explore the showcase account", systemImage: "sparkles")
                     }
-                    .disabled(!store.sortedRecordings.isEmpty)
+                    .accessibilityIdentifier("showcase.entry")
+                    .disabled(!ShowcaseSession.shared.canSwitch || optimizer.state.isBusy)
                 } footer: {
-                    if !store.sortedRecordings.isEmpty {
-                        Text("Available while your library is empty.")
-                    }
+                    Text("A populated student and work demo with playable audio, practice questions, materials, and connected brains. Your personal library and API key stay separate. Finish any processing before switching accounts.")
                 }
 
                 // Beta: the tester writes one sentence, the app supplies the

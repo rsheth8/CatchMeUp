@@ -21,7 +21,7 @@ final class DocumentFixtureTests: XCTestCase {
     // MARK: - Slides
 
     func testSlideDeckKeepsOrderTitlesAndSpeakerNotes() throws {
-        let url = try fixture("cs61a-week3-environment-diagrams", "pptx")
+        let url = try fixture("Week 3 Slides - Environment Diagrams", "pptx")
         let pages = try DocumentProcessor.extract(url: url, kind: .slides)
 
         XCTAssertEqual(pages.count, 5)
@@ -43,12 +43,12 @@ final class DocumentFixtureTests: XCTestCase {
     }
 
     func testSlideTextAndNotesAreBothSearchable() throws {
-        let url = try fixture("cs61a-week3-environment-diagrams", "pptx")
+        let url = try fixture("Week 3 Slides - Environment Diagrams", "pptx")
         let pages = try DocumentProcessor.extract(url: url, kind: .slides)
 
         let material = SupplementalMaterial(
             name: "Week 3 slides", kind: .slides, brainID: UUID(),
-            originalFilename: "cs61a-week3-environment-diagrams.pptx", state: .ready,
+            originalFilename: "Week 3 Slides - Environment Diagrams.pptx", state: .ready,
             pages: pages.map {
                 MaterialPage(number: $0.number, title: $0.title,
                              text: $0.text, speakerNotes: $0.speakerNotes)
@@ -70,7 +70,7 @@ final class DocumentFixtureTests: XCTestCase {
     // MARK: - PDF with a text layer
 
     func testTextPDFKeepsEveryPageAndItsProse() throws {
-        let url = try fixture("cs61a-week3-reading", "pdf")
+        let url = try fixture("Week 3 Reading - Higher-Order Functions", "pdf")
         let pages = try DocumentProcessor.extract(url: url, kind: .pdf)
 
         XCTAssertEqual(pages.count, 3)
@@ -85,7 +85,7 @@ final class DocumentFixtureTests: XCTestCase {
     // MARK: - Scanned PDF, no text layer
 
     func testScannedPDFFallsBackToVisionOCR() throws {
-        let url = try fixture("cs61a-discussion3-scan", "pdf")
+        let url = try fixture("Discussion 3 Worksheet", "pdf")
         let pages = try DocumentProcessor.extract(url: url, kind: .pdf)
 
         XCTAssertEqual(pages.count, 1)

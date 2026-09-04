@@ -560,7 +560,26 @@ final class LibraryStore {
 
     func seedSampleIfEmpty() {
         guard sortedRecordings.isEmpty else { return }
+
+        // Brains first: the recordings carry brainIDs, and a recording filed
+        // into a brain that doesn't exist yet shows up unfiled.
+        for brain in SampleData.brains where !brains.contains(where: { $0.id == brain.id }) {
+            brains.append(brain)
+        }
+        saveBrains()
+
         recordings = SampleData.recordings
         saveRecordings()
+
+        // The documents go in through the ordinary import path rather than
+        // being faked, so what the demo shows is real extraction: slide notes,
+        // page text, and OCR on the scan. It runs in the background and the
+        // material rows show their own progress while it does.
+        let urls = SampleData.bundledMaterialURLs
+        if !urls.isEmpty {
+            MaterialStore.shared.importFiles(urls,
+                                             into: SampleData.cs61aBrainID,
+                                             attachingTo: SampleData.week3ID)
+        }
     }
 }

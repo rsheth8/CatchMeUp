@@ -275,7 +275,7 @@ struct LibraryView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 30)
                 }
-                Button("Load two sample recaps") {
+                Button("Load a sample library") {
                     Haptics.tap()
                     withAnimation(.gentle) { store.seedSampleIfEmpty() }
                 }

@@ -182,7 +182,7 @@ struct SettingsView: View {
                         Haptics.tap()
                         store.seedSampleIfEmpty()
                     } label: {
-                        Label("Load two sample recaps", systemImage: "sparkles")
+                        Label("Load a sample library", systemImage: "sparkles")
                     }
                     .disabled(!store.sortedRecordings.isEmpty)
                 } footer: {

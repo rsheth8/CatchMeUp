@@ -91,30 +91,13 @@ struct OnboardingView: View {
     }
 
     private var signInPane: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "person.crop.circle.badge.checkmark")
-                .font(.system(size: 62, weight: .regular))
-                .foregroundStyle(Color.brand.gradient)
-                .frame(height: 120)
-            VStack(spacing: 12) {
-                Text("Save your spot")
-                    .font(.title.bold())
-                Text("Sign in so your name shows up here on this iPhone. Everything still stays local and syncs through your own iCloud — this is just personalization.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-            SignInButtons(onDone: { withAnimation(.quick) { page += 1 } })
-                .padding(.horizontal, 32)
-            Button("Not now") { withAnimation(.quick) { page += 1 } }
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Spacer()
-        }
-        .padding()
+        AuthWelcomeView(
+            headline: "Save your spot",
+            message: "Sign in so your name shows up here on this iPhone. Everything still stays local and syncs through your own iCloud — this is just personalization.",
+            skipTitle: "Not now",
+            onDone: { withAnimation(.quick) { page += 1 } },
+            onSkip: { withAnimation(.quick) { page += 1 } }
+        )
     }
 
     private var tourOfferPane: some View {

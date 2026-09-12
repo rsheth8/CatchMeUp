@@ -39,6 +39,10 @@ struct CatchMeUpApp: App {
                 .fullScreenCover(isPresented: Bindable(ShowcaseSession.shared).isActive) {
                     ShowcaseView()
                 }
+                .fullScreenCover(isPresented: Bindable(auth).isPresentingSignOutGate) {
+                    SignOutGateView()
+                        .environment(auth)
+                }
                 .onChange(of: scenePhase) { _, phase in
                     guard !ShowcaseSession.shared.isActive else { return }
                     // Coming back to the foreground is the common way a parked

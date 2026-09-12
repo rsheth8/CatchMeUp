@@ -21,6 +21,11 @@ final class AuthManager {
 
     var isSignedIn: Bool { provider != nil }
 
+    /// Transient UI state for the post-sign-out gate — not persisted, and
+    /// cleared once the gate is dismissed.
+    var isPresentingSignOutGate = false
+    var pendingGoodbyeName: String?
+
     private init() {
         provider = Keychain.get("auth.provider")
         displayName = Keychain.get("auth.name")
@@ -57,11 +62,13 @@ final class AuthManager {
     }
 
     func signOut() {
+        pendingGoodbyeName = displayName ?? email
         provider = nil
         displayName = nil
         email = nil
         Keychain.set("", for: "auth.provider")
         Keychain.set("", for: "auth.name")
         Keychain.set("", for: "auth.email")
+        isPresentingSignOutGate = true
     }
 }

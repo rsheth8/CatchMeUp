@@ -47,7 +47,10 @@ twenty minutes in TestFlight.
 - **Data collection** — answer *no data collected*. There's no analytics SDK,
   no crash reporter, no account, and no identifier. Transcripts sent to a
   provider are sent by the user, with the user's own key, to a service the user
-  chose — that isn't collection by this app.
+  chose — that isn't collection by this app. Choosing Whisper downloads model
+  weights from `huggingface.co`; that request carries no user data and uploads
+  nothing, and no audio or transcript is involved. Still worth knowing it is the
+  one host the app contacts on its own behalf.
 - **Encryption** — already answered in `Info.plist` (standard HTTPS only).
 - **Sign-in** — there is none; say so, and don't attach a demo account.
 
@@ -65,7 +68,10 @@ twenty minutes in TestFlight.
 > 3. Did the "Before you read" warm-up feel useful or feel like a gate?
 > 4. Did the daily reminder arrive when it should, and stay quiet when nothing
 >    was due?
-> 5. Anything that felt slow, stuck, or made you close the app.
+> 5. If you tried Whisper: was the transcript noticeably better than Apple
+>    Speech on the same recording, and was the wait worth it? Did the speaker
+>    labels land on the right people?
+> 6. Anything that felt slow, stuck, or made you close the app.
 >
 > **Sending a report:** Settings ▸ Send feedback pre-fills your version, device
 > and library size — never your notes or transcripts. Paste it into TestFlight
@@ -76,11 +82,19 @@ twenty minutes in TestFlight.
 - **Demo mode writes sample notes, not real ones.** A first-run user who
   records something and gets a recap about a billing migration hasn't found a
   bug — they're in Demo mode. Switch to Apple's on-device model or an API key.
-- **Transcription is Apple Speech, on device.** Accented speech, crosstalk and
-  bad room audio degrade it, and everything downstream inherits that. iOS 26
-  uses `SpeechAnalyzer`, which is built for long files; older versions fall back
-  to `SFSpeechRecognizer`. Neither runs in the Simulator — that is Apple's
-  limitation, not a build problem, so test transcription on a real device.
+- **Transcription defaults to Apple Speech, on device.** Accented speech,
+  crosstalk and bad room audio degrade it, and everything downstream inherits
+  that. iOS 26 uses `SpeechAnalyzer`, which is built for long files; older
+  versions fall back to `SFSpeechRecognizer`. Neither runs in the Simulator —
+  that is Apple's limitation, not a build problem, so test Apple Speech on a
+  real device.
+- **Whisper is the accuracy option, and the only one that labels speakers.**
+  Settings ▸ Transcription. It costs a one-time model download (Base, ≈145 MB,
+  is preselected) and runs noticeably slower with more battery use. Speaker
+  labels are meetings-only and add a second ≈25 MB model. Labels come back as
+  "Speaker 1" / "Speaker 2" and are renamed from the transcript — diarization
+  tells voices apart but cannot learn names. Unlike Apple Speech, Whisper does
+  run in the Simulator.
 - **Offline grading is keyword matching.** A right answer in unusual words can
   be marked "not quite". Model grading (Settings ▸ Study) fixes most of it and
   needs an API key.

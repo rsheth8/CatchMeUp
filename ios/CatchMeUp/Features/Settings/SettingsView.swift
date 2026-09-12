@@ -116,6 +116,22 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
+                        TranscriptionView()
+                    } label: {
+                        LabeledContent {
+                            Text(settings.speechEngine == .whisper
+                                 ? "Whisper \(settings.whisperVariant.title)"
+                                 : "Apple Speech")
+                        } label: {
+                            Label("Transcription", systemImage: "waveform")
+                        }
+                    }
+                } footer: {
+                    Text("Which engine turns your audio into text, and whether meeting transcripts say who spoke. Separate from the recap engine above — audio never leaves this iPhone either way.")
+                }
+
+                Section {
+                    NavigationLink {
                         StorageView()
                     } label: {
                         LabeledContent {
@@ -221,7 +237,10 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Transcription", value: "Apple Speech · on device")
+                    LabeledContent("Transcription",
+                                   value: settings.speechEngine == .whisper
+                                       ? "Whisper \(settings.whisperVariant.title) · on device"
+                                       : "Apple Speech · on device")
                     LabeledContent("Recaps saved", value: "\(store.sortedRecordings.count)")
                     LabeledContent("Brains", value: "\(store.visibleBrains.count)")
                     LabeledContent("Questions", value: "\(study.liveItems.count)")

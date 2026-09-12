@@ -32,12 +32,28 @@ xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
 
 `CatchMeUpTests` covers the logic that has no UI to check it by eye: transcript chunking and
 recap merging, retrieval ranking and budgeting, lenient JSON parsing, guided-generation
-cleanup and prompt assembly, and the progress and time-remaining maths.
+cleanup and prompt assembly, speaker mapping and renaming, and the progress and
+time-remaining maths.
 
 ```bash
 xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
+
+Three tests in `WhisperDownloadTests` are skipped by default: they fetch real
+models from Hugging Face and run Whisper and diarization against bundled audio.
+Run them after touching model storage or the transcriber — they are the only
+check that the download, the recorded path, and Whisper's own output agree.
+
+```bash
+TEST_RUNNER_CMU_LIVE_MODEL_DOWNLOAD=1 xcodebuild -project CatchMeUp.xcodeproj \
+  -scheme CatchMeUp -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:CatchMeUpTests/WhisperDownloadTests test
+```
+
+The `TEST_RUNNER_` prefix is required and is stripped before the test process
+sees it. Without it the variable never arrives, the tests skip, and the suite
+reports a pass that checked nothing.
 
 ### Show the app without an API key
 
@@ -89,6 +105,47 @@ python3 ios/tools/load_cli_data.py --match "Program Efficiency, Part 2" --with-a
 Use `--replace` for a clean iOS library instead of a merge, or `--dry-run` to inspect the count
 without changing the Simulator.
 
+### Choosing a transcription engine
+
+**Settings ▸ Transcription.** Two engines, both fully on device; audio is never
+uploaded either way. The choice is independent of the recap engine — a Claude
+key transcribes nothing, and Apple Speech needs no key.
+
+| | Apple Speech | Whisper |
+|---|---|---|
+| Setup | none | one model download |
+| Speed | fast | slower, more battery |
+| Accents, room noise, jargon | weaker | better |
+| Speaker labels | **impossible** — Apple's API returns no speaker identity | yes |
+| Runs in the Simulator | no | **yes** |
+
+Whisper is [WhisperKit](https://github.com/argmaxinc/WhisperKit) running CoreML
+builds of OpenAI's models. Four sizes are offered — Tiny (≈75 MB), Base
+(≈145 MB), Small (≈470 MB) and Large v3 Turbo (≈950 MB) — filtered to what the
+device can actually run. **Base is preselected**, not the largest one the
+hardware allows: picking "Whisper" should not silently queue a gigabyte.
+
+Models download over Wi-Fi to the app's own folder, are reused offline, and can
+be deleted individually from the same screen. A recording whose model isn't on
+the device yet downloads it first and shows a real percentage.
+
+#### Speaker labels
+
+With Whisper selected, **Label who spoke** diarizes meeting transcripts with
+[SpeakerKit](https://github.com/argmaxinc/WhisperKit)'s Pyannote models
+(≈25 MB) and reconciles the two results on word timings. Meetings only — a
+lecture is one voice, and a second model to discover that wastes battery.
+
+Lines come back as "Speaker 1", "Speaker 2": diarization can tell voices apart
+but has no way to learn a name. Rename one from the transcript (long-press a
+chip or a line) and every line moves together — into the recap prompt's
+timestamped text, shares, exports and the synced copy on other devices.
+Stretches it could not attribute stay unlabelled rather than being guessed at,
+and segments are never merged across a speaker change.
+
+If diarization fails, the transcript is still saved without labels. Losing a
+finished transcript to a failed enhancement would be the worse outcome.
+
 ### Transcription on older iPhones
 
 The recap engine and speech recognition are separate. A Claude (or other provider) API
@@ -123,9 +180,12 @@ iOS 17–25 retains SFSpeechRecognizer, now with a cancellation-safe inactivity 
 It requires on-device recognition support and never silently switches to Apple's servers.
 This legacy dictation engine is less suitable for long recordings than SpeechAnalyzer.
 
-### Transcription does not run in the Simulator
+### Apple Speech does not run in the Simulator
 
-The Simulator ships no speech models, so this is the one step you cannot exercise there.
+The Simulator ships no Apple speech models. **Whisper does run there** — its
+models are ordinary CoreML rather than a system asset Apple withholds — so the
+Simulator can now exercise the full pipeline end to end if you select it.
+For Apple Speech, this remains the one step you cannot test there.
 Both engines claim to be present and neither works: `SFSpeechRecognizer` reports
 `isAvailable` and `supportsOnDeviceRecognition` as true and then fails with
 `kAFAssistantErrorDomain Code=1101`, and iOS 26's `SpeechAnalyzer` reports
@@ -152,6 +212,8 @@ the ones the phone would have produced.
 | Library: search across notes, mode filters, date grouping, swipe-delete, rename | ✅ |
 | Record from mic (`AVAudioRecorder`) with live waveform + pause/resume; import a file | ✅ |
 | On-device transcription with timestamps (`SpeechAnalyzer` on iOS 26, `SFSpeechRecognizer` below) | ✅ device only |
+| Whisper as an alternative engine (WhisperKit, CoreML) — four model sizes, downloaded and managed in-app | ✅ |
+| Speaker labels on meeting transcripts (SpeakerKit / Pyannote), renameable, carried into notes and exports | ✅ |
 | Recap engine — **Demo**, **Your API key** (Anthropic + any OpenAI-compatible), **On-device** (iOS 26 Foundation Models, guided generation via `@Generable`) | ✅ |
 | Meeting + lecture recap views, tickable action items, scrubbing player, searchable transcript, Markdown share | ✅ |
 | Brains: create, assign recaps, ask (scoped RAG), jump to audio, hand a course to the Study tab | ✅ |
@@ -220,7 +282,6 @@ entitlement) the toggle shows "Sign in to iCloud…" and the app stays local —
 
 ## Not yet (later phases)
 
-- WhisperKit for higher-accuracy transcription + diarization
 - Cortex concept graph (exam, clip, and the neural map preview ship)
 - `.docx` export (Markdown only for now)
 - Richer conflict handling for sync
@@ -244,7 +305,9 @@ CatchMeUp/
   Engine/         Prompts, LLMClient, RecapEngine (Demo / Cloud / Apple on-device),
                   OnDeviceRecap (@Generable schema for Apple Intelligence),
                   RecapChunking (long transcripts), Retrieval (ranked context for asks)
-  Transcription/  SpeechTranscriber (on-device) + Mock
+  Transcription/  Apple Speech (SpeechAnalyzer / SFSpeechRecognizer) + Mock,
+                  WhisperTranscriber (WhisperKit + SpeakerKit diarization),
+                  WhisperModels (variant catalogue and the model download store)
   Audio/          recorder + player
   Pipeline/       ProcessingQueue — transcribe → recap → save, plus background
                   assertions, BGProcessingTask resumption and time estimates

@@ -78,6 +78,32 @@ enum EngineKind: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Speech engine choice
+
+/// Which engine turns audio into text. Separate from `EngineKind`, which is
+/// only about who writes the *notes* — the two are independent, and conflating
+/// them is the single most common misreading of this app's privacy story.
+enum SpeechEngineKind: String, CaseIterable, Identifiable {
+    case apple
+    case whisper
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .apple: return "Apple Speech"
+        case .whisper: return "Whisper"
+        }
+    }
+
+    var blurb: String {
+        switch self {
+        case .apple: return "Built in, nothing to download, starts instantly. Good on clear, close speech. No speaker labels — Apple's API does not report who spoke."
+        case .whisper: return "A model you download once. More accurate on accents, room noise and technical terms, and the only engine here that can label who said what. Slower, and it uses more battery."
+        }
+    }
+}
+
 // MARK: - AppSettings
 
 @MainActor
@@ -96,6 +122,14 @@ final class AppSettings {
     var model: String { didSet { d.set(model, forKey: "model") } }
     var customBaseURL: String { didSet { d.set(customBaseURL, forKey: "customBaseURL") } }
     var defaultMode: Mode { didSet { d.set(defaultMode.rawValue, forKey: "defaultMode") } }
+
+    // MARK: Transcription
+
+    var speechEngine: SpeechEngineKind { didSet { d.set(speechEngine.rawValue, forKey: "speechEngine") } }
+    var whisperVariant: WhisperVariant { didSet { d.set(whisperVariant.rawValue, forKey: "whisperVariant") } }
+    /// Label who spoke. Meetings only: a lecture is one voice, and paying for a
+    /// second model to discover that is a waste of the user's battery.
+    var diarizeSpeakers: Bool { didSet { d.set(diarizeSpeakers, forKey: "diarizeSpeakers") } }
 
     // MARK: Audio storage
 
@@ -159,6 +193,13 @@ final class AppSettings {
         model = dd.string(forKey: "model") ?? Providers.by(dd.string(forKey: "providerID") ?? "anthropic").defaultModel
         customBaseURL = dd.string(forKey: "customBaseURL") ?? ""
         defaultMode = Mode(rawValue: dd.string(forKey: "defaultMode") ?? "") ?? .meeting
+        // Apple Speech by default: it needs no download and no decision, and a
+        // first run that stalls on 500 MB is a first run people don't finish.
+        speechEngine = isShowcase ? .apple
+            : (SpeechEngineKind(rawValue: dd.string(forKey: "speechEngine") ?? "") ?? .apple)
+        whisperVariant = WhisperVariant(rawValue: dd.string(forKey: "whisperVariant") ?? "")
+            ?? WhisperVariant.recommended
+        diarizeSpeakers = dd.object(forKey: "diarizeSpeakers") as? Bool ?? true
         recordingQuality = AudioQuality(rawValue: dd.string(forKey: "recordingQuality") ?? "")
             ?? .fallback
         // Absent rather than false on a fresh install — tidying up imports is

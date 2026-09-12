@@ -455,7 +455,12 @@ final class ProcessingQueue {
     private func transcribe(_ recording: Recording, attemptID: UUID, generation: Int) async throws -> Recording {
         var recording = recording
         let engine = settings.engineKind
-        let transcriber = Transcription.engine(demo: engine == .demo, mode: recording.mode)
+        let transcriber = Transcription.engine(
+            demo: engine == .demo, mode: recording.mode,
+            speech: settings.speechEngine,
+            variant: settings.whisperVariant,
+            diarize: settings.diarizeSpeakers && recording.mode == .meeting
+        )
         let started = Date()
 
         // Pulls the file down from iCloud first when it isn't on the device.

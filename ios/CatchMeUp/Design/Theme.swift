@@ -69,6 +69,9 @@ struct AmbientBackground: View {
     var tint: Color = .brand
     var intensity: Double = 1
 
+    @State private var drift = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ZStack {
             Color.groupBG
@@ -79,17 +82,21 @@ struct AmbientBackground: View {
                         .fill(RadialGradient(colors: [tint.opacity(0.20 * intensity), .clear],
                                              center: .center, startRadius: 0, endRadius: w * 0.7))
                         .frame(width: w * 1.6, height: w * 1.6)
-                        .offset(x: -w * 0.45, y: -w * 0.95)
+                        .offset(x: drift ? -w * 0.38 : -w * 0.45, y: drift ? -w * 1.02 : -w * 0.95)
                     Circle()
                         .fill(RadialGradient(colors: [Color.mint.opacity(0.14 * intensity), .clear],
                                              center: .center, startRadius: 0, endRadius: w * 0.55))
                         .frame(width: w * 1.1, height: w * 1.1)
-                        .offset(x: w * 0.5, y: -w * 0.45)
+                        .offset(x: drift ? w * 0.43 : w * 0.5, y: drift ? -w * 0.52 : -w * 0.45)
                 }
             }
             .allowsHitTesting(false)
         }
         .ignoresSafeArea()
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 7).repeatForever(autoreverses: true)) { drift = true }
+        }
     }
 }
 

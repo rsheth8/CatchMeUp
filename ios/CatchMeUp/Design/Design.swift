@@ -337,12 +337,40 @@ struct BrandMark: View {
     var animated = false
 
     @State private var appeared = false
+    @State private var startDate = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let degs: [Double] = [56, 118, 180, 242, 304]
     private let lit = 2
+    /// Seconds from appearing to the outermost node lighting up.
+    private let revealDuration = 0.9
 
     var body: some View {
+        Group {
+            if animated && !reduceMotion {
+                // Time-driven rather than a withAnimation'd @State: Canvas
+                // doesn't interpolate its own drawing, so the reveal and the
+                // idle glow both read elapsed time each frame instead.
+                TimelineView(.animation) { timeline in
+                    let elapsed = timeline.date.timeIntervalSince(startDate)
+                    mark(reveal: min(1, elapsed / revealDuration), pulse: elapsed)
+                }
+            } else {
+                mark(reveal: 1, pulse: nil)
+            }
+        }
+        .frame(width: size, height: size)
+        .scaleEffect(appeared ? 1 : 0.86)
+        .opacity(appeared ? 1 : 0)
+        .onAppear {
+            startDate = Date()
+            guard animated, !reduceMotion else { appeared = true; return }
+            withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) { appeared = true }
+        }
+        .accessibilityLabel("CatchMeUp")
+    }
+
+    private func mark(reveal: Double, pulse: TimeInterval?) -> some View {
         Canvas { ctx, canvas in
             let s = min(canvas.width, canvas.height)
             let c = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
@@ -354,7 +382,15 @@ struct BrandMark: View {
             let litSize = 0.275 * s
             let inset = dorm / 2 + 0.018 * s
 
-            // connectors
+            // Each node lights up a beat after the one closer to the centre
+            // node, so the mark reads as a signal reaching outward rather
+            // than just popping in all at once.
+            func nodeReveal(_ i: Int) -> Double {
+                let delay = Double(abs(i - lit)) * 0.22
+                return max(0, min(1, (reveal - delay) / (1 - delay)))
+            }
+
+            // connectors, drawn as the signal reaches them
             var line = Path()
             for i in 0..<(pts.count - 1) {
                 let a = pts[i], b = pts[i + 1]
@@ -364,12 +400,26 @@ struct BrandMark: View {
                 line.move(to: CGPoint(x: a.x + dx * inset, y: a.y + dy * inset))
                 line.addLine(to: CGPoint(x: b.x - dx * inset, y: b.y - dy * inset))
             }
-            ctx.stroke(line, with: .color(.primary.opacity(0.22)), lineWidth: 0.014 * s)
+            let connectorReveal = min(nodeReveal(0), nodeReveal(pts.count - 1))
+            ctx.stroke(line, with: .color(.primary.opacity(0.22 * connectorReveal)), lineWidth: 0.014 * s)
+
+            // soft glow behind the lit node, breathing gently once it's settled
+            if let pulse {
+                let breathe = 0.5 + 0.5 * sin(pulse * 1.6)
+                let glowSize = litSize * (1.35 + 0.2 * breathe)
+                let glowRect = CGRect(x: pts[lit].x - glowSize / 2, y: pts[lit].y - glowSize / 2,
+                                      width: glowSize, height: glowSize)
+                ctx.drawLayer { layer in
+                    layer.addFilter(.blur(radius: litSize * 0.22))
+                    layer.fill(Path(ellipseIn: glowRect),
+                              with: .color(.brand.opacity((0.30 + 0.18 * breathe) * reveal)))
+                }
+            }
 
             // dormant nodes, fading toward the tips — neutral so they read on
             // either ground, the way the off-white nodes do on the icon
             for (i, p) in pts.enumerated() where i != lit {
-                let alpha = abs(i - lit) == 1 ? 0.34 : 0.18
+                let alpha = (abs(i - lit) == 1 ? 0.34 : 0.18) * nodeReveal(i)
                 let rect = CGRect(x: p.x - dorm / 2, y: p.y - dorm / 2, width: dorm, height: dorm)
                 ctx.fill(Path(roundedRect: rect, cornerRadius: dorm * 0.28),
                          with: .color(.primary.opacity(alpha)))
@@ -394,14 +444,71 @@ struct BrandMark: View {
                 x += step
             }
         }
-        .frame(width: size, height: size)
-        .scaleEffect(appeared ? 1 : 0.86)
-        .opacity(appeared ? 1 : 0)
-        .onAppear {
-            guard animated, !reduceMotion else { appeared = true; return }
-            withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) { appeared = true }
+    }
+}
+
+// MARK: - Brand pulse (used in place of a generic spinner)
+//
+// The same node network as `BrandMark`, but small and endlessly looping — a
+// signal breathing outward from the lit node and back. Swapped in wherever
+// the app would otherwise show a plain system spinner while it's actually
+// doing the thing the brand mark represents: turning audio into notes.
+
+struct BrandPulse: View {
+    var size: CGFloat = 22
+    var tint: Color = .brand
+
+    @State private var startDate = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let degs: [Double] = [56, 118, 180, 242, 304]
+    private let lit = 2
+    private let cycle = 1.6
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                ProgressView().tint(tint)
+            } else {
+                TimelineView(.animation) { timeline in
+                    canvas(elapsed: timeline.date.timeIntervalSince(startDate))
+                }
+                .frame(width: size, height: size)
+            }
         }
-        .accessibilityLabel("CatchMeUp")
+        .onAppear { startDate = Date() }
+        .accessibilityHidden(true)
+    }
+
+    private func canvas(elapsed: TimeInterval) -> some View {
+        Canvas { ctx, canvas in
+            let s = min(canvas.width, canvas.height)
+            let c = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
+            let r = 0.325 * s
+            let pts = degs.map { d in
+                CGPoint(x: c.x + r * cos(d * .pi / 180), y: c.y - r * sin(d * .pi / 180))
+            }
+            let dorm = 0.20 * s
+            let litSize = 0.34 * s
+
+            // The signal sweeps out to the far rim and back, one ring at a time.
+            let phase = (elapsed / cycle).truncatingRemainder(dividingBy: 1)
+            let travel = phase < 0.5 ? phase * 2 : (1 - phase) * 2 // 0→1→0
+
+            func nodeAlpha(_ i: Int) -> Double {
+                let dist = Double(abs(i - lit)) / 2
+                return max(0.2, 1 - min(1, abs(travel - dist) * 2.4))
+            }
+
+            for (i, p) in pts.enumerated() where i != lit {
+                let rect = CGRect(x: p.x - dorm / 2, y: p.y - dorm / 2, width: dorm, height: dorm)
+                ctx.fill(Path(ellipseIn: rect), with: .color(tint.opacity(0.35 * nodeAlpha(i))))
+            }
+
+            let rect = CGRect(x: pts[lit].x - litSize / 2, y: pts[lit].y - litSize / 2,
+                              width: litSize, height: litSize)
+            ctx.fill(Path(ellipseIn: rect), with: .color(tint))
+        }
     }
 }
 

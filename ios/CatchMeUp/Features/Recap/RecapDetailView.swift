@@ -1078,7 +1078,7 @@ struct ProcessingCard: View {
                 }
 
                 if job.phase.isIndeterminate && job.phase.isActive {
-                    ProgressView().tint(tint)
+                    BrandPulse(size: 22, tint: tint)
                 } else if job.showsProgress {
                     ProgressView(value: overall)
                         .tint(job.phase == .paused ? .secondary : tint)
@@ -1185,7 +1185,7 @@ struct ProcessingCard: View {
                 if reduceMotion || job.phase.isIndeterminate {
                     Image(systemName: "circle.dotted").foregroundStyle(tint)
                 } else {
-                    ProgressView().controlSize(.small)
+                    BrandPulse(size: 16, tint: tint)
                 }
             }
         } else {

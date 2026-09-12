@@ -19,44 +19,61 @@ struct CatchMeUpApp: App {
     /// but feed the same brains and retrieval path.
     @State private var materials = MaterialStore.shared
     @State private var auth = AuthManager.shared
+    /// Plays once per cold launch, over everything else. Skipped for the
+    /// simulator showcase launch args so that route doesn't pick up an extra
+    /// ~2s of ceremony every time it's used to validate a build.
+    @State private var showSplash: Bool = {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showShowcase") ||
+            ProcessInfo.processInfo.arguments.contains("-showKnowledge") { return false }
+        #endif
+        return true
+    }()
 
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(store)
-                .environment(settings)
-                .environment(router)
-                .environment(optimizer)
-                .environment(queue)
-                .environment(study)
-                .environment(materials)
-                .environment(auth)
-                .fontDesign(.rounded)
-                .tint(.brand)
-                .task { await houseKeeping() }
-                .fullScreenCover(isPresented: Bindable(ShowcaseSession.shared).isActive) {
-                    ShowcaseView()
-                }
-                .fullScreenCover(isPresented: Bindable(auth).isPresentingSignOutGate) {
-                    SignOutGateView()
-                        .environment(auth)
-                }
-                .onChange(of: scenePhase) { _, phase in
-                    guard !ShowcaseSession.shared.isActive else { return }
-                    // Coming back to the foreground is the common way a parked
-                    // job gets picked up — the scheduled task is the fallback
-                    // for when the user doesn't return for a while.
-                    if phase == .active {
-                        Task { await queue.resumeUnfinishedWork() }
-                    } else {
-                        // Leaving is the right moment to rewrite the week of
-                        // reminders: whatever the user just studied is already
-                        // recorded, so the numbers are current.
-                        StudyNotifier.reschedule(study: study, settings: settings)
+            ZStack {
+                RootView()
+                    .environment(store)
+                    .environment(settings)
+                    .environment(router)
+                    .environment(optimizer)
+                    .environment(queue)
+                    .environment(study)
+                    .environment(materials)
+                    .environment(auth)
+                    .fontDesign(.rounded)
+                    .tint(.brand)
+                    .task { await houseKeeping() }
+                    .fullScreenCover(isPresented: Bindable(ShowcaseSession.shared).isActive) {
+                        ShowcaseView()
                     }
+                    .fullScreenCover(isPresented: Bindable(auth).isPresentingSignOutGate) {
+                        SignOutGateView()
+                            .environment(auth)
+                    }
+                    .onChange(of: scenePhase) { _, phase in
+                        guard !ShowcaseSession.shared.isActive else { return }
+                        // Coming back to the foreground is the common way a parked
+                        // job gets picked up — the scheduled task is the fallback
+                        // for when the user doesn't return for a while.
+                        if phase == .active {
+                            Task { await queue.resumeUnfinishedWork() }
+                        } else {
+                            // Leaving is the right moment to rewrite the week of
+                            // reminders: whatever the user just studied is already
+                            // recorded, so the numbers are current.
+                            StudyNotifier.reschedule(study: study, settings: settings)
+                        }
+                    }
+
+                if showSplash {
+                    LaunchSplashView { showSplash = false }
+                        .zIndex(1)
                 }
+            }
         }
     }
 

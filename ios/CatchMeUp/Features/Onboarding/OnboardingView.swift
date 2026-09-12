@@ -79,15 +79,22 @@ struct OnboardingView: View {
         .background(AmbientBackground(tint: currentTint, intensity: 1.2))
     }
 
+    /// Same node/connector language as `BrandMark` — a hairline running
+    /// behind small "nodes", the current page lit with the brand gradient.
     private var dots: some View {
-        HStack(spacing: 7) {
-            ForEach(0..<(panes.count + 2), id: \.self) { i in
-                Capsule()
-                    .fill(i == page ? currentTint : Color.secondary.opacity(0.25))
-                    .frame(width: i == page ? 22 : 7, height: 7)
-                    .animation(.quick, value: page)
+        ZStack {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.18))
+                .frame(height: 1.5)
+            HStack(spacing: 10) {
+                ForEach(0..<(panes.count + 2), id: \.self) { i in
+                    Capsule()
+                        .fill(i == page ? AnyShapeStyle(currentTint.gradient) : AnyShapeStyle(Color.secondary.opacity(0.25)))
+                        .frame(width: i == page ? 22 : 7, height: 7)
+                }
             }
         }
+        .animation(.quick, value: page)
     }
 
     private var signInPane: some View {

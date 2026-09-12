@@ -92,20 +92,20 @@ struct RootView: View {
     private var tabs: some View {
         TabView(selection: Bindable(router).selectedTab) {
             LibraryView()
-                .tabItem { Label("Recaps", systemImage: "waveform") }
+                .tabItem { Label("Recaps", systemImage: "waveform").symbolEffect(.bounce, value: router.selectedTab == .library) }
                 .tag(AppTab.library)
 
             StudyView()
-                .tabItem { Label("Study", systemImage: "graduationcap") }
+                .tabItem { Label("Study", systemImage: "graduationcap").symbolEffect(.bounce, value: router.selectedTab == .study) }
                 .tag(AppTab.study)
                 .badge(dueBadge)
 
             BrainsView()
-                .tabItem { Label("Brains", systemImage: "brain") }
+                .tabItem { Label("Brains", systemImage: "brain").symbolEffect(.bounce, value: router.selectedTab == .brains) }
                 .tag(AppTab.brains)
 
             SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tabItem { Label("Settings", systemImage: "gearshape").symbolEffect(.bounce, value: router.selectedTab == .settings) }
                 .tag(AppTab.settings)
         }
     }

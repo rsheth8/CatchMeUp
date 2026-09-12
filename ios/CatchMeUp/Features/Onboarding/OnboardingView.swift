@@ -34,6 +34,12 @@ struct OnboardingView: View {
              tint: .amber),
     ]
 
+    /// The intro panes are tags `0..<panes.count`; sign-in and the tour offer
+    /// are two extra pages after that, each with its own buttons instead of
+    /// Next/Get started.
+    private var currentTint: Color { page < panes.count ? panes[page].tint : .brand }
+    private var tourOfferTag: Int { panes.count + 1 }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -41,7 +47,6 @@ struct OnboardingView: View {
                 Button("Skip") { finish() }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .opacity(page == panes.count - 1 ? 0 : 1)
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
@@ -50,38 +55,105 @@ struct OnboardingView: View {
                 ForEach(Array(panes.enumerated()), id: \.offset) { idx, pane in
                     paneView(pane).tag(idx)
                 }
+                signInPane.tag(panes.count)
+                tourOfferPane.tag(tourOfferTag)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
 
             dots
                 .padding(.bottom, 26)
 
-            Button {
-                Haptics.tap()
-                if page < panes.count - 1 {
+            if page < panes.count {
+                Button {
+                    Haptics.tap()
                     withAnimation(.quick) { page += 1 }
-                } else {
-                    finish()
+                } label: {
+                    Text(page == panes.count - 1 ? "Continue" : "Next")
                 }
-            } label: {
-                Text(page == panes.count - 1 ? "Get started" : "Next")
+                .buttonStyle(.prominent(panes[page].tint))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+                .animation(.quick, value: page)
             }
-            .buttonStyle(.prominent(panes[page].tint))
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-            .animation(.quick, value: page)
         }
-        .background(AmbientBackground(tint: panes[page].tint, intensity: 1.2))
+        .background(AmbientBackground(tint: currentTint, intensity: 1.2))
     }
 
     private var dots: some View {
         HStack(spacing: 7) {
-            ForEach(0..<panes.count, id: \.self) { i in
+            ForEach(0..<(panes.count + 2), id: \.self) { i in
                 Capsule()
-                    .fill(i == page ? panes[page].tint : Color.secondary.opacity(0.25))
+                    .fill(i == page ? currentTint : Color.secondary.opacity(0.25))
                     .frame(width: i == page ? 22 : 7, height: 7)
                     .animation(.quick, value: page)
             }
+        }
+    }
+
+    private var signInPane: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .font(.system(size: 62, weight: .regular))
+                .foregroundStyle(Color.brand.gradient)
+                .frame(height: 120)
+            VStack(spacing: 12) {
+                Text("Save your spot")
+                    .font(.title.bold())
+                Text("Sign in so your name shows up here on this iPhone. Everything still stays local and syncs through your own iCloud — this is just personalization.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            SignInButtons(onDone: { withAnimation(.quick) { page += 1 } })
+                .padding(.horizontal, 32)
+            Button("Not now") { withAnimation(.quick) { page += 1 } }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Spacer()
+        }
+        .padding()
+    }
+
+    private var tourOfferPane: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "sparkles.rectangle.stack")
+                .font(.system(size: 62, weight: .regular))
+                .foregroundStyle(Color.brand.gradient)
+                .frame(height: 120)
+                .symbolEffect(.bounce, value: page)
+            VStack(spacing: 12) {
+                Text("Want a quick look\naround first?")
+                    .font(.title.bold())
+                    .multilineTextAlignment(.center)
+                Text("Take a five-minute tour through a sample account — recordings, study practice, and connected notes already filled in. Nothing you do there touches your real library.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            VStack(spacing: 12) {
+                Button("Take the tour", action: startTour)
+                    .buttonStyle(.prominent(.brand))
+                Button("Skip, start using the app") { finish() }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 32)
+            Spacer()
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func startTour() {
+        finish()
+        Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            ShowcaseSession.shared.enter()
         }
     }
 
@@ -93,6 +165,7 @@ struct OnboardingView: View {
                     .font(.system(size: 62, weight: .regular))
                     .foregroundStyle(pane.tint.gradient)
                     .frame(height: 120)
+                    .symbolEffect(.bounce, value: page)
             } else {
                 BrandMark(size: 120, animated: true)
                     .frame(height: 120)

@@ -10,6 +10,9 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation.git
     from: 0.9.19
+  GoogleSignIn-iOS:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 7.1.0
 
 settings:
   base:
@@ -42,6 +45,10 @@ targets:
       - target: CatchMeUpWidgets
         embed: true
       - package: ZIPFoundation
+      - package: GoogleSignIn-iOS
+        product: GoogleSignIn
+      - package: GoogleSignIn-iOS
+        product: GoogleSignInSwift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app

@@ -1,4 +1,5 @@
 import SwiftUI
+import GoogleSignIn
 
 struct RootView: View {
     @Environment(AppSettings.self) private var settings
@@ -25,7 +26,10 @@ struct RootView: View {
 
         appleTabs
             .onChange(of: router.selectedTab) { _, _ in Haptics.tap(.soft) }
-            .onOpenURL { router.open($0) }
+            .onOpenURL {
+                if GIDSignIn.sharedInstance.handle($0) { return }
+                router.open($0)
+            }
             .onContinueUserActivity(CatchMeUpLink.recapActivityType) { router.continueActivity($0) }
             .onReceive(NotificationCenter.default.publisher(for: .catchMeUpRouteRequested)) { _ in
                 if !ShowcaseSession.shared.isActive { router.consumePendingRoute() }

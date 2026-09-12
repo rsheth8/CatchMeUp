@@ -8,6 +8,7 @@ struct MeetingWorkspaceView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(ProcessingQueue.self) private var queue
     @Environment(AppRouter.self) private var router
+    @Environment(\.guidedTour) private var tour
     @State private var section = "Summary"
     @State private var editingTask: MeetingFollowUp?
     @State private var editingOutcome: MeetingOutcome?
@@ -27,15 +28,17 @@ struct MeetingWorkspaceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Picker("Meeting section", selection: $section) {
-                ForEach(["Summary", "Decisions", "Follow-ups", "Materials"], id: \.self) { name in
+                ForEach(["Summary", "Findings", "Follow-ups", "Materials"], id: \.self) { name in
                     Text(name).tag(name)
                 }
             }
             .pickerStyle(.segmented)
+            .tourAnchor("meeting.segmented")
+            .onChange(of: section) { _, new in tour?.note("meeting.section", new) }
 
             if let recording {
                 switch section {
-                case "Decisions": outcomes
+                case "Findings": outcomes
                 case "Follow-ups": followUps(recording)
                 case "Materials": documentSection(recording)
                 default: summary(recording)
@@ -49,8 +52,10 @@ struct MeetingWorkspaceView: View {
                         }
                         .font(.subheadline.weight(.semibold))
                     }
-                    .disabled(analyzing || queue.job(for: recordingID) != nil)
-                    Text("Uses your selected recap engine. Attachments inform context, never what was said aloud.")
+                    .disabled(analyzing || queue.job(for: recordingID) != nil || settings.engineKind == .demo)
+                    Text(settings.engineKind == .demo
+                         ? "Switch to an on-device or API-key engine in Settings to refresh insights."
+                         : "Uses your selected recap engine. Attachments inform context, never what was said aloud.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message = workspace.analysisNotice {

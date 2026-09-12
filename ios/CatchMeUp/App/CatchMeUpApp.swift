@@ -18,6 +18,7 @@ struct CatchMeUpApp: App {
     /// Supplemental PDFs and slide decks live independently from recordings,
     /// but feed the same brains and retrieval path.
     @State private var materials = MaterialStore.shared
+    @State private var auth = AuthManager.shared
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -31,6 +32,7 @@ struct CatchMeUpApp: App {
                 .environment(queue)
                 .environment(study)
                 .environment(materials)
+                .environment(auth)
                 .fontDesign(.rounded)
                 .tint(.brand)
                 .task { await houseKeeping() }

@@ -9,6 +9,7 @@ struct RecapDetailView: View {
     @Environment(StudyStore.self) private var study
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.guidedTour) private var tour
 
     @State private var practising = false
     @State private var prequestions: [StudyItem] = []
@@ -88,6 +89,7 @@ struct RecapDetailView: View {
             Haptics.success()
         }
         .onChange(of: store.audio.cloudItems) { _, _ in refreshAudioState() }
+        .onChange(of: player.isPlaying) { _, playing in tour?.note("recap.playing", playing) }
         .onDisappear { player.stop() }
         .userActivity(CatchMeUpLink.recapActivityType, isActive: recording != nil) { activity in
             guard let rec = recording else { return }
@@ -408,6 +410,7 @@ struct RecapDetailView: View {
                             }
                             .padding(.vertical, 8)
                             .contentShape(Rectangle())
+                            .opacity(recording?.hasAudio == true ? 1 : 0.55)
                         }
                         .buttonStyle(.plain)
                         .disabled(recording?.hasAudio != true)
@@ -505,7 +508,8 @@ struct RecapDetailView: View {
     /// finally minted enough. Turning the setting off leaves the offer open on
     /// purpose: that's a global preference, not a decision about this recap.
     private func offerPrequestions() {
-        guard settings.prequestions,
+        guard tour?.isActive != true,
+              settings.prequestions,
               let rec = recording,
               rec.mode == .lecture,
               rec.isProcessed,
@@ -735,6 +739,7 @@ struct RecapDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(player.isPlaying ? "Pause recording" : "Play recording")
             .accessibilityIdentifier("recap.playback")
+            .tourAnchor("recap.playback")
 
             Button { player.skip(15) } label: {
                 Image(systemName: "goforward.15").font(.title3)
@@ -825,7 +830,11 @@ struct RecapDetailView: View {
                         store.delete(rec); dismiss()
                     } label: { Label("Delete", systemImage: "trash") }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    if isExporting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
                 .disabled(isExporting)
             }

@@ -21,7 +21,8 @@ struct PrivacyView: View {
 
                 section("Your recordings", "waveform") {
                     para("Audio is recorded on this iPhone and transcribed on this iPhone, by Apple's on-device speech recogniser. The audio file itself is never uploaded to us or to anyone else.")
-                    para("If iCloud sync is on, your recordings, notes and questions are stored in **your** iCloud Drive — your account, your storage, under Apple's terms. We have no server and no account to sign into, so there is nowhere else for them to go.")
+                    para("If iCloud sync is on, your recordings, notes and questions are stored in **your** iCloud Drive — your account, your storage, under Apple's terms. We have no server, so there is nowhere else for them to go.")
+                    para("Signing in with Apple or Google just shows your name here on this iPhone — it doesn't create an account with us or unlock anything, since there's no server to sign into. We store only your name and email, on this device, in the Keychain.")
                 }
 
                 section("What the model sees", "sparkles") {
@@ -38,7 +39,7 @@ struct PrivacyView: View {
                 }
 
                 section("What we collect", "eye.slash") {
-                    para("Nothing. There is no analytics SDK, no crash reporter, no advertising identifier, no tracking, and no account. The app makes no network request except the ones you cause: writing notes with your own API key, and iCloud sync.")
+                    para("Nothing. There is no analytics SDK, no crash reporter, no advertising identifier, and no tracking. The app makes no network request except the ones you cause: writing notes with your own API key, iCloud sync, and — if you sign in with Apple or Google — that one-time exchange with Apple or Google to confirm who you are.")
                     para("Bug reports are the one exception, and they only happen when you tap Send feedback and choose where it goes. That report carries version numbers and counts — never your notes, transcripts, answers or key.")
                 }
 
@@ -67,7 +68,7 @@ struct PrivacyView: View {
             Text("Your recordings stay yours")
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
-            Text("The short version: the audio never leaves this iPhone, there is no account and no analytics, and the only thing that can be sent anywhere is transcript text — to a provider you chose, with a key you supplied.")
+            Text("The short version: the audio never leaves this iPhone, there is no server or analytics, and the only thing that can be sent anywhere is transcript text — to a provider you chose, with a key you supplied.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

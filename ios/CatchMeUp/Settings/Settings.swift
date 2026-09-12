@@ -249,6 +249,7 @@ enum Keychain {
         guard !value.isEmpty, let data = value.data(using: .utf8) else { return }
         var add = q
         add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 

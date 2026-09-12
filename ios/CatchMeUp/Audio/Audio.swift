@@ -108,7 +108,10 @@ final class AudioRecorder: NSObject {
                 defer { deadline.cancel() }
                 do {
                     let session = AVAudioSession.sharedInstance()
-                    try session.setCategory(.playAndRecord, mode: .default,
+                    // Tuned for a single speaker on the built-in mic: wider dynamic
+                    // range and speech-oriented processing pick up quiet or distant
+                    // voices better than `.default`, which is mixed for general use.
+                    try session.setCategory(.playAndRecord, mode: .spokenAudio,
                                             options: [.defaultToSpeaker, .allowBluetoothHFP])
                     try session.setActive(true)
 

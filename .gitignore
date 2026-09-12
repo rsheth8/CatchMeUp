@@ -48,3 +48,8 @@ dist/
 
 # Local course downloads (multi-MB video — never commit)
 GraphQL-Crash-Course/
+
+# Ruflo local secrets and runtime data
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/

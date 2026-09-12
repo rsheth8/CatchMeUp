@@ -13,6 +13,7 @@ struct StudyView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppRouter.self) private var router
     @Environment(ProcessingQueue.self) private var queue
+    @Environment(\.guidedTour) private var tour
 
     @State private var session: SessionRequest?
     @State private var showPlanner = false
@@ -78,7 +79,9 @@ struct StudyView: View {
             }
             .fullScreenCover(isPresented: $showCards) {
                 FlashcardsView(brainID: pickedBrain, limit: 20)
+                    .tourHost(tour)
             }
+            .onChange(of: showCards) { _, open in if open { tour?.note("study.flashcardsOpened", true) } }
             .sheet(isPresented: $showPlanner) { ExamPlannerView() }
             .fullScreenCover(isPresented: $showFocus) {
                 FocusSessionView(brainID: pickedBrain)
@@ -229,6 +232,7 @@ struct StudyView: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                                 GridItem(.flexible(), spacing: 10)], spacing: 10) {
                 modeTile(.flashcards, tint: .brand) { showCards = true }
+                    .tourAnchor("study.flashcards")
                 modeTile(.practiceExam, tint: .amber) {
                     session = SessionRequest(mode: .practiceExam, brainID: pickedBrain, limit: 12)
                 }

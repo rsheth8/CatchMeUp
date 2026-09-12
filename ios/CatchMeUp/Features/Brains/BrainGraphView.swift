@@ -268,6 +268,7 @@ struct BrainGraphView: View {
     @State private var selectedID: String?
     @State private var resetToken = 0
     @State private var selectedMaterial: SupplementalMaterial?
+    @Environment(\.guidedTour) private var tour
 
     init(brain: Brain, recordings: [Recording], materials: [SupplementalMaterial] = []) {
         self.brain = brain
@@ -346,6 +347,7 @@ struct BrainGraphView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Recenter map")
+            .tourAnchor("brain.recenter")
         }
     }
 
@@ -495,6 +497,7 @@ struct BrainGraphView: View {
             resetToken += 1
             selectedID = nil
         }
+        tour?.note("brain.recentered", true)
     }
 
     private func nodeTint(_ node: BrainGraphNode) -> Color {

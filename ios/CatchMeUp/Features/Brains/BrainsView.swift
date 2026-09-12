@@ -4,6 +4,7 @@ struct BrainsView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(MaterialStore.self) private var materials
     @Environment(AppRouter.self) private var router
+    @Environment(\.guidedTour) private var tour
     @State private var showNew = false
     @State private var newName = ""
     @State private var newMode: Mode = .lecture
@@ -56,6 +57,7 @@ struct BrainsView: View {
             )) {
                 if let id = router.brainGraphID, let brain = store.brain(id) {
                     BrainGraphScreen(brain: brain, recordings: store.recordings(inBrain: id))
+                        .tourHost(tour)
                 }
             }
         }
@@ -107,6 +109,7 @@ struct BrainsView: View {
                 .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
+        .tourAnchor("brain.card.\(brain.id)")
         .accessibilityLabel(brain.name)
         .accessibilityValue(brainAccessibilityValue(brain))
         .contextMenu {

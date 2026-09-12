@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(StudyStore.self) private var study
     @Environment(AudioOptimizer.self) private var optimizer
+    @Environment(AuthManager.self) private var auth
 
     /// Non-nil while the feedback share sheet is up; holds the text being sent.
     @State private var feedback: String?
@@ -14,6 +15,29 @@ struct SettingsView: View {
 
         NavigationStack {
             Form {
+                Section {
+                    if auth.isSignedIn {
+                        HStack(spacing: 12) {
+                            IconTile(symbol: "person.fill", tint: .brand, size: 38)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(auth.displayName ?? auth.email ?? "Signed in")
+                                    .font(.subheadline.weight(.semibold))
+                                if let email = auth.email, auth.displayName != nil {
+                                    Text(email).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button("Sign Out", role: .destructive) { auth.signOut() }
+                                .font(.caption)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        SignInButtons()
+                    }
+                } header: {
+                    Text("Account")
+                }
+
                 // Readiness, stated once at the top instead of buried in a footer.
                 Section {
                     HStack(spacing: 12) {

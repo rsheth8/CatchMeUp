@@ -24,6 +24,7 @@ struct FlashcardsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.guidedTour) private var tour
 
     @State private var queue: [StudyItem] = []
     @State private var index = 0
@@ -128,6 +129,7 @@ struct FlashcardsView: View {
         .gesture(swipe(item))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("flashcard.card")
+        .tourAnchor("flashcard.card")
         .accessibilityLabel(flipped ? "Answer. \(item.revealText)" : "Card. \(item.prompt)")
         .accessibilityHint(flipped ? "Swipe left if still learning, right if you got it"
                                    : "Double tap to turn the card over")
@@ -254,11 +256,13 @@ struct FlashcardsView: View {
             .buttonStyle(.soft(.amber))
 
             Button {
+                tour?.note("study.cardGraded", true)
                 commit(item, grade: .good, direction: 1)
             } label: {
                 Label("Got it", systemImage: "checkmark")
             }
             .buttonStyle(.prominent(.mint))
+            .tourAnchor("flashcards.gotIt")
         }
         .disabled(!flipped)
         .opacity(flipped ? 1 : 0.4)
@@ -305,6 +309,7 @@ struct FlashcardsView: View {
     private func flip() {
         Haptics.tap(.soft)
         flipped.toggle()
+        if flipped { tour?.note("study.cardFlipped", true) }
     }
 
     // MARK: - Flow

@@ -48,6 +48,7 @@ struct LibraryView: View {
     @State private var filter: LibraryFilter = .all
     @State private var renameTarget: Recording?
     @State private var renameText = ""
+    @State private var importError = false
 
     var body: some View {
         @Bindable var router = router
@@ -80,6 +81,11 @@ struct LibraryView: View {
                           allowedContentTypes: [.audio, .mpeg4Audio, .mp3, .wav,
                                                 .mpeg4Movie, .movie, .quickTimeMovie],
                           allowsMultipleSelection: false) { handleImport($0) }
+            .alert("Couldn't import that file", isPresented: $importError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("That file couldn't be read as audio or video. Try a different file.")
+            }
             .alert("Rename recap", isPresented: Binding(
                 get: { renameTarget != nil },
                 set: { if !$0 { renameTarget = nil } }
@@ -118,6 +124,7 @@ struct LibraryView: View {
                                          isFirst: rec.id == filtered.first?.id,
                                          isLast: rec.id == filtered.last?.id)
                             }
+                            .tourAnchor("library.recap.\(rec.id)")
                             .buttonStyle(ThreadRowStyle(tint: rec.mode.accent))
                             .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 18))
                             .listRowSeparator(.hidden)
@@ -242,19 +249,25 @@ struct LibraryView: View {
     }
 
     private var readinessRow: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Finish setup").font(.subheadline.weight(.semibold))
-                Text(settings.readinessHint).font(.caption).foregroundStyle(.secondary)
+        Button { router.selectedTab = .settings } label: {
+            HStack(spacing: 11) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Finish setup").font(.subheadline.weight(.semibold))
+                    Text(settings.readinessHint).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 0)
+            .padding(12)
+            .background(Color.orange.opacity(0.10),
+                        in: RoundedRectangle(cornerRadius: Metric.tile, style: .continuous))
         }
-        .padding(12)
-        .background(Color.orange.opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: Metric.tile, style: .continuous))
+        .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 2, leading: 18, bottom: 10, trailing: 18))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
@@ -426,7 +439,10 @@ struct LibraryView: View {
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         Task {
-            guard let imported = await store.audio.importFile(from: url) else { return }
+            guard let imported = await store.audio.importFile(from: url) else {
+                importError = true
+                return
+            }
             var rec = Recording(title: url.deletingPathExtension().lastPathComponent,
                                 mode: Mode.guess(fromFilename: url.lastPathComponent),
                                 audioFilename: imported.filename)
@@ -630,8 +646,8 @@ struct RecapRow: View {
             liveProgress(job)
         } else if recording.needsAttention {
             Label(recording.segments.isEmpty
-                  ? "Transcription needs another try — tap to retry"
-                  : "Notes need another try — tap to retry",
+                  ? "Transcription needs another try — tap to open"
+                  : "Notes need another try — tap to open",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.subheadline)
                 .foregroundStyle(.orange)

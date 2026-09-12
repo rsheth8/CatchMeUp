@@ -39,10 +39,12 @@ final class BetaNavigationUITests: XCTestCase {
         let meeting = app.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH 'Billing migration: launch readiness'")
         ).firstMatch
+        for _ in 0..<8 where !meeting.exists { app.swipeUp() }
         XCTAssertTrue(meeting.waitForExistence(timeout: 10))
+        scrollToHittable(meeting, in: app)
         meeting.tap()
         XCTAssertTrue(app.segmentedControls.buttons["Summary"].waitForExistence(timeout: 5))
-        for section in ["Decisions", "Follow-ups", "Materials", "Summary"] {
+        for section in ["Findings", "Follow-ups", "Materials", "Summary"] {
             app.segmentedControls.buttons[section].tap()
             XCTAssertTrue(app.segmentedControls.buttons[section].isSelected)
         }
@@ -103,6 +105,131 @@ final class BetaNavigationUITests: XCTestCase {
         snapshot(app, "Privacy")
         back(app)
         XCTAssertTrue(app.buttons["showcase.exit"].exists)
+    }
+
+    func testGuidedTourPlayAKeyMoment() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-showShowcase"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["showcase.tour"].waitForExistence(timeout: 30))
+        app.buttons["showcase.tour"].tap()
+        let start = app.buttons["tour.start.Play a key moment"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
+        // Step 1: the tour navigated to Library and spotlighted the real row;
+        // this taps the actual control, not a copy of it.
+        XCTAssertTrue(app.navigationBars["Recaps"].waitForExistence(timeout: 5))
+        let recording = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Midterm review: choosing the right abstraction'")
+        ).firstMatch
+        XCTAssertTrue(recording.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["tour.skip"].exists)
+        recording.tap()
+
+        // Step 2: the spotlighted playback control.
+        let playback = app.buttons["recap.playback"]
+        XCTAssertTrue(playback.waitForExistence(timeout: 5))
+        playback.tap()
+
+        // Both steps complete -> the driver stops and the overlay is gone.
+        let skipGone = expectation(for: NSPredicate(format: "exists == 0"), evaluatedWith: app.buttons["tour.skip"])
+        wait(for: [skipGone], timeout: 5)
+    }
+
+    func testGuidedTourPracticeForAnExam() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-showShowcase"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["showcase.tour"].waitForExistence(timeout: 30))
+        app.buttons["showcase.tour"].tap()
+        let start = app.buttons["tour.start.Practice for an exam"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
+        // Step 1: landed on Study, scoped to Computer Science; tap the real tile.
+        XCTAssertTrue(app.navigationBars["Study"].waitForExistence(timeout: 5))
+        let flashcards = app.staticTexts["Flashcards"]
+        XCTAssertTrue(flashcards.waitForExistence(timeout: 5))
+        flashcards.tap()
+
+        // Step 2: flip the real card.
+        XCTAssertTrue(app.navigationBars["Flashcards"].waitForExistence(timeout: 5))
+        let card = app.otherElements["flashcard.card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        card.tap()
+
+        // Step 3: grade it with the real "Got it" control.
+        let gotIt = app.buttons["Got it"]
+        XCTAssertTrue(gotIt.waitForExistence(timeout: 5))
+        gotIt.tap()
+
+        let skipGone = expectation(for: NSPredicate(format: "exists == 0"), evaluatedWith: app.buttons["tour.skip"])
+        wait(for: [skipGone], timeout: 5)
+    }
+
+    func testGuidedTourExploreConnectedIdeas() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-showShowcase"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["showcase.tour"].waitForExistence(timeout: 30))
+        app.buttons["showcase.tour"].tap()
+        let start = app.buttons["tour.start.Explore connected ideas"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
+        // Step 1: landed on Brains; tap the real Computer Science card.
+        XCTAssertTrue(app.navigationBars["Brains"].waitForExistence(timeout: 5))
+        let computerScience = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Computer Science'")
+        ).firstMatch
+        XCTAssertTrue(computerScience.waitForExistence(timeout: 5))
+        computerScience.tap()
+
+        // Step 2: the tour opens the neural map itself; tap the real recenter control.
+        let recenter = app.buttons["Recenter map"]
+        XCTAssertTrue(recenter.waitForExistence(timeout: 5))
+        recenter.tap()
+
+        let skipGone = expectation(for: NSPredicate(format: "exists == 0"), evaluatedWith: app.buttons["tour.skip"])
+        wait(for: [skipGone], timeout: 5)
+    }
+
+    func testGuidedTourRunAMeeting() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-showShowcase"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["showcase.tour"].waitForExistence(timeout: 30))
+        app.buttons["showcase.tour"].tap()
+        let start = app.buttons["tour.start.Run a meeting"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
+        // Step 1: landed on Library; tap the real meeting row.
+        XCTAssertTrue(app.navigationBars["Recaps"].waitForExistence(timeout: 5))
+        let meeting = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Cutover review: owners and open questions'")
+        ).firstMatch
+        XCTAssertTrue(meeting.waitForExistence(timeout: 5))
+        meeting.tap()
+
+        // Steps 2-5: tap each real segmented-control section in the tour's order.
+        for section in ["Findings", "Follow-ups", "Materials", "Summary"] {
+            let button = app.segmentedControls.buttons[section]
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            button.tap()
+        }
+
+        let skipGone = expectation(for: NSPredicate(format: "exists == 0"), evaluatedWith: app.buttons["tour.skip"])
+        wait(for: [skipGone], timeout: 5)
     }
 
     private func tab(_ app: XCUIApplication, _ prefix: String) -> XCUIElement {

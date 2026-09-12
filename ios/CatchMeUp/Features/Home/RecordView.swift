@@ -253,7 +253,7 @@ struct RecordView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(permissionDenied)
+            .disabled(permissionDenied || recorder.isStarting)
 
             // spacer that matches the pause button so the record circle stays centred
             Color.clear.frame(width: 58, height: 58)
@@ -289,8 +289,13 @@ struct RecordView: View {
         let elapsed = recorder.elapsed
         let url = recorder.stop()
         // Nothing usable was captured (e.g. stopped while the mic was still
-        // spinning up) — don't leave an empty recap behind.
-        guard let url, elapsed > 0.4 else { dismiss(); return }
+        // spinning up) — don't leave an empty recap behind, and don't leave
+        // the user wondering why the screen just closed.
+        guard let url, elapsed > 0.4 else {
+            Haptics.warning()
+            startError = "Too short to save."
+            return
+        }
         var rec = store.recording(sessionID) ?? Recording(id: sessionID, title: "\(mode.title) · \(Date().formatted(date: .abbreviated, time: .shortened))",
                             mode: mode,
                             audioFilename: url.lastPathComponent,

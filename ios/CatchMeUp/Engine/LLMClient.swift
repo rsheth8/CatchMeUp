@@ -4,6 +4,11 @@ import Foundation
 struct LLMClient {
     let config: ProviderConfig
 
+    /// A full-lecture recap in one request can legitimately take minutes to
+    /// generate. `URLSession`'s 60s default reads that as a hang and kills a
+    /// request that was actually still working.
+    private static let requestTimeout: TimeInterval = 300
+
     func complete(system: String, user: String, maxTokens: Int = 8000) async throws -> String {
         do {
             switch config.kind {
@@ -25,6 +30,7 @@ struct LLMClient {
         guard !config.apiKey.isEmpty else { throw EngineError.missingKey }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
+        req.timeoutInterval = Self.requestTimeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
@@ -53,6 +59,7 @@ struct LLMClient {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = Self.requestTimeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !config.apiKey.isEmpty {
             req.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")

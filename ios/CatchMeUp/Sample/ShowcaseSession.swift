@@ -41,6 +41,7 @@ struct ShowcaseView: View {
     @State private var router = AppRouter()
     @State private var optimizer = AudioOptimizer()
     @State private var showTour = false
+    @State private var tourDriver = GuidedTourDriver()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -65,9 +66,12 @@ struct ShowcaseView: View {
                 .background(.ultraThinMaterial)
                 RootView()
         }
+            .tourHost(tourDriver)
             .environment(store).environment(settings).environment(study)
             .environment(materials).environment(router).environment(optimizer)
             .environment(ProcessingQueue.shared)
+            .environment(AuthManager.shared)
+            .environment(\.guidedTour, tourDriver)
             .tint(.brand)
             .interactiveDismissDisabled()
             .task {
@@ -87,10 +91,14 @@ struct ShowcaseView: View {
                             Text("A fictional student and work account. Edits stay here, separate from your personal library. Audio is narrated sample content; answers use local source matching, not a live AI model.")
                         }
                         Section("Try it in five minutes") {
-                            tour("Play a key moment", "Hear the recording exactly where a recap links to it.", .library)
-                            tour("Practice for an exam", "Answer questions, reveal flashcards, and watch the review schedule update.", .study)
-                            tour("Explore connected ideas", "Open a brain, explore its neural map, then ask about a concept or project risk.", .brains)
-                            tour("Run a meeting", "Open Payments, review decisions, edit owners and deadlines, and complete follow-ups.", .brains)
+                            tour("Play a key moment", "Hear the recording exactly where a recap links to it.",
+                                 GuidedTourSteps.playAKeyMoment)
+                            tour("Practice for an exam", "Answer questions, reveal flashcards, and watch the review schedule update.",
+                                 GuidedTourSteps.practiceForAnExam)
+                            tour("Explore connected ideas", "Open a brain, explore its neural map, then ask about a concept or project risk.",
+                                 GuidedTourSteps.exploreConnectedIdeas)
+                            tour("Run a meeting", "Open Payments, review decisions, edit owners and deadlines, and complete follow-ups.",
+                                 GuidedTourSteps.runAMeeting)
                         }
                         Section("What's real here") {
                             Text("Search, playback, clip seeking, documents, graphs, study grading, scheduling, task editing, and exports use the normal app. Live transcription and AI generation are simulated in Demo mode. Cloud sync and automatic reminders stay off for this account.")
@@ -105,9 +113,9 @@ struct ShowcaseView: View {
             }
     }
 
-    private func tour(_ title: String, _ detail: String, _ tab: AppTab) -> some View {
+    private func tour(_ title: String, _ detail: String, _ steps: [TourStep]) -> some View {
         Button {
-            router.selectedTab = tab
+            tourDriver.start(steps, router: router, library: store, study: study)
             showTour = false
         } label: {
             VStack(alignment: .leading, spacing: 5) {
@@ -115,5 +123,6 @@ struct ShowcaseView: View {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary)
             }.padding(.vertical, 5)
         }
+        .accessibilityIdentifier("tour.start.\(title)")
     }
 }

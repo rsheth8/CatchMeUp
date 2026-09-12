@@ -149,6 +149,29 @@ final class LibraryStore {
         saveRecordings()
     }
 
+    /// Renames one diarized speaker across a whole transcript.
+    ///
+    /// Diarization produces "Speaker 1", not "Dana" — it can tell voices apart
+    /// but has no way to learn a name. Putting the rename here rather than in
+    /// the view means every line moves together and the change is saved and
+    /// synced like any other edit: the transcript, the timestamped text the
+    /// recap prompt reads, and every export all agree afterward.
+    ///
+    /// An empty new name clears the label rather than writing a blank one.
+    func renameSpeaker(in recordingID: UUID, from old: String, to newName: String) {
+        guard let i = recordings.firstIndex(where: { $0.id == recordingID && !$0.deleted }) else { return }
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != old else { return }
+        var changed = false
+        for j in recordings[i].segments.indices where recordings[i].segments[j].speaker == old {
+            recordings[i].segments[j].speaker = name.isEmpty ? nil : name
+            changed = true
+        }
+        guard changed else { return }
+        recordings[i].updatedAt = .now
+        saveRecordings()
+    }
+
     /// Ticks an action item off (or back on).
     func updateMeeting(_ recordingID: UUID, _ change: (inout MeetingWorkspace) -> Void) {
         guard let i = recordings.firstIndex(where: { $0.id == recordingID && !$0.deleted }) else { return }

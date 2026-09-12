@@ -10,6 +10,12 @@ protocol Transcriber {
 
 enum SpeechPreparation: Equatable {
     case audio, permission, model, starting, recovering
+    /// Whisper's model is ours to fetch rather than Apple's to install, so it
+    /// reports a real fraction. Apple's `.model` cannot — the system gives no
+    /// progress for a language asset — and inventing one there was the exact
+    /// bug this app already fixed once.
+    case whisperModel(WhisperVariant, Double)
+    case speakers
 
     var label: String {
         switch self {
@@ -18,6 +24,10 @@ enum SpeechPreparation: Equatable {
         case .model: return "Downloading speech model"
         case .starting: return "Preparing on-device transcription"
         case .recovering: return "Restarting Apple Speech"
+        case .whisperModel(let variant, let fraction):
+            guard fraction > 0 else { return "Downloading Whisper \(variant.title)" }
+            return "Downloading Whisper \(variant.title) — \(Int(fraction * 100))%"
+        case .speakers: return "Identifying speakers"
         }
     }
 
@@ -28,6 +38,9 @@ enum SpeechPreparation: Equatable {
         case .model: return "First use may take a few minutes. Stay online while Apple prepares the language model. Your audio stays on this device."
         case .starting: return "Apple Speech turns audio into text. Your recap engine, including Claude, writes the notes afterward."
         case .recovering: return "Apple Speech took longer than expected. Trying once more automatically — your audio is safe."
+        case .whisperModel(let variant, _):
+            return "A one-time \(variant.sizeLabel) download over Wi-Fi. Later recordings reuse it offline, and your audio stays on this device."
+        case .speakers: return "Working out how many people spoke and which lines are whose. Labels are “Speaker 1”, “Speaker 2” — you can rename them afterward."
         }
     }
 }
@@ -57,8 +70,12 @@ enum TranscriptionError: LocalizedError {
 /// with a time range on every phrase. A lecture is the second job, so the newer
 /// engine leads and the older one stays as the floor for iOS 17–25.
 enum Transcription {
-    static func engine(demo: Bool, mode: Mode = .meeting) -> Transcriber {
+    static func engine(demo: Bool, mode: Mode = .meeting,
+                       speech: SpeechEngineKind = .apple,
+                       variant: WhisperVariant = .base,
+                       diarize: Bool = false) -> Transcriber {
         if demo { return MockTranscriber(mode: mode) }
+        if speech == .whisper { return WhisperTranscriber(variant: variant, diarize: diarize) }
         if #available(iOS 26.0, *) {
             return AnalyzerTranscriber()
         }

@@ -10,6 +10,12 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation.git
     from: 0.9.19
+  # Argmax's open-source Swift package. Two products are used: WhisperKit (Whisper
+  # as CoreML, on device) and SpeakerKit (Pyannote diarization, also CoreML). They
+  # ship together and share the model download machinery, so they come in together.
+  ArgmaxOSS:
+    url: https://github.com/argmaxinc/WhisperKit.git
+    exactVersion: 1.1.0
 
 settings:
   base:
@@ -42,6 +48,10 @@ targets:
       - target: CatchMeUpWidgets
         embed: true
       - package: ZIPFoundation
+      - package: ArgmaxOSS
+        product: WhisperKit
+      - package: ArgmaxOSS
+        product: SpeakerKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.catchmeup.app
@@ -57,6 +67,8 @@ targets:
     platform: iOS
     sources:
       - path: CatchMeUpTests
+        excludes:
+          - Fixtures/README.md
       - path: SampleMaterials
     dependencies:
       - target: CatchMeUp

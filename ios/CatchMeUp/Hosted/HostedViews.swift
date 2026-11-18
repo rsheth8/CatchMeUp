@@ -24,7 +24,7 @@ struct HostedAccountSection: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Sign in so your recaps can be counted. Your Apple or Google account is only used to tell accounts apart.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        SignInButtons()
+                        SignInButtons(cloud: true)
                         if let error = session.signInError {
                             Text(error).font(.footnote).foregroundStyle(.orange)
                         }
@@ -34,7 +34,7 @@ struct HostedAccountSection: View {
             } header: {
                 Text("CatchMeUp Cloud")
             } footer: {
-                Text("Only transcript text is sent, never audio. It is used to write your notes and is not kept after the reply.")
+                Text("Never audio. Sent to write your notes: the transcript, text from documents you attached to a meeting, the agenda, and your questions with the notes found for them. Not kept after the reply.")
             }
 
             if session.isSignedIn {

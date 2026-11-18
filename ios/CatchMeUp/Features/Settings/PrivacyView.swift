@@ -39,7 +39,7 @@ struct PrivacyView: View {
                 }
 
                 section("What we collect", "eye.slash") {
-                    para("Nothing. There is no analytics SDK, no crash reporter, no advertising identifier, and no tracking. The app makes no network request except the ones you cause: writing notes with your own API key, iCloud sync, and — if you sign in with Apple or Google — that one-time exchange with Apple or Google to confirm who you are.")
+                    para("Nothing by default. There is no analytics SDK, no crash reporter, no advertising identifier, and no tracking. The app makes no network request except the ones you cause: writing notes with your own API key, CatchMeUp Cloud if you choose it (which stores your Apple or Google account id to count recaps, deletable in Settings), iCloud sync, and — if you sign in with Apple or Google — that one-time exchange with Apple or Google to confirm who you are.")
                     para("Bug reports are the one exception, and they only happen when you tap Send feedback and choose where it goes. That report carries version numbers and counts — never your notes, transcripts, answers or key.")
                 }
 
@@ -68,7 +68,7 @@ struct PrivacyView: View {
             Text("Your recordings stay yours")
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
-            Text("The short version: the audio never leaves this iPhone, there is no analytics, and the only thing that can be sent anywhere is transcript text — to a provider you chose with your own key, or, if you choose CatchMeUp Cloud, to our service to be written up with Claude.")
+            Text("The short version: the audio never leaves this iPhone, there is no analytics, and what can be sent anywhere is text, never audio: to a provider you chose with your own key, or, if you choose CatchMeUp Cloud, to our service to be written up with Claude. With Cloud that text is the transcript, text from documents you attached to a meeting, a meeting agenda, and your questions with the notes found to answer them.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -88,7 +88,7 @@ struct PrivacyView: View {
             let name = Providers.by(settings.providerID).label
             return "You're using **\(name)**, so transcripts are sent there when a recap is written."
         case .hosted:
-            return "You're using **CatchMeUp Cloud**, so transcript text is sent to CatchMeUp's service, and from there to Claude, when a recap is written. The audio never leaves this iPhone."
+            return "You're using **CatchMeUp Cloud**, so the transcript, any attached-document text, the agenda, and your questions with the notes found for them are sent to CatchMeUp's service, and from there to Claude. The audio never leaves this iPhone. If you sign in to Cloud, your Apple or Google account id is stored on our service to count your recaps; Settings has Sign out and Delete account."
         }
     }
 

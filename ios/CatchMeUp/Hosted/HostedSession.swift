@@ -42,6 +42,11 @@ final class HostedSession {
     private var accessToken: String?
     private var accessExpiry = Date.distantPast
     private var refreshTask: Task<String, Error>?
+    /// Bumped whenever the signed-in account changes (sign in, sign out, delete,
+    /// a revoked session). A network reply that started under an older value is
+    /// dropped, so a slow refresh can never bring a signed-out session back or
+    /// hand one account's token to the next.
+    private var generation = 0
 
     private enum Key {
         static let refresh = "hosted.refresh"
@@ -69,6 +74,10 @@ final class HostedSession {
     }
 
     func signIn(_ provider: HostedProvider, idToken: String, nonce: String) async throws {
+        generation += 1
+        let mine = generation
+        refreshTask?.cancel()
+        refreshTask = nil
         do {
             let json = try await api().send(
                 "POST", "/v1/auth/\(provider.rawValue)",
@@ -77,6 +86,12 @@ final class HostedSession {
             guard let access = json["accessToken"] as? String,
                   let refresh = json["refreshToken"] as? String
             else { throw HostedError.badResponse }
+            guard mine == generation else {
+                // Signed out, or signed in again, while this was in flight: do not
+                // adopt it, and give the token back.
+                if let api = apiProvider() { _ = try? await api.send("POST", "/v1/auth/logout", body: ["refreshToken": refresh]) }
+                throw CancellationError()
+            }
             store.set(refresh, for: Key.refresh)
             accessToken = access
             accessExpiry = now().addingTimeInterval(Self.lifetime(of: json))
@@ -93,10 +108,13 @@ final class HostedSession {
 
     /// Signs out of the service only. The local profile is `AuthManager`'s.
     func signOut() async {
-        if let refresh = store.get(Key.refresh), !refresh.isEmpty, let api = apiProvider() {
+        // Local state goes first, so nothing in flight can use the session while
+        // the server is told.
+        let refresh = store.get(Key.refresh)
+        clearTokens()
+        if let refresh, !refresh.isEmpty, let api = apiProvider() {
             _ = try? await api.send("POST", "/v1/auth/logout", body: ["refreshToken": refresh])
         }
-        clearTokens()
     }
 
     /// Deletes the account on the server (an App Store requirement). Returns
@@ -188,15 +206,17 @@ final class HostedSession {
             throw HostedError.notSignedIn
         }
         let api = try api()
+        let mine = generation
         let task = Task { () throws -> String in
             let json = try await api.send("POST", "/v1/auth/refresh", body: ["refreshToken": refresh])
             guard let access = json["accessToken"] as? String else { throw HostedError.badResponse }
+            guard mine == self.generation else { throw CancellationError() }
             self.accessToken = access
             self.accessExpiry = self.now().addingTimeInterval(Self.lifetime(of: json))
             return access
         }
         refreshTask = task
-        defer { refreshTask = nil }
+        defer { if mine == generation { refreshTask = nil } }
         do {
             return try await task.value
         } catch HostedError.unauthorized {
@@ -206,6 +226,9 @@ final class HostedSession {
     }
 
     private func clearTokens() {
+        generation += 1
+        refreshTask?.cancel()
+        refreshTask = nil
         store.set("", for: Key.refresh)
         accessToken = nil
         accessExpiry = .distantPast

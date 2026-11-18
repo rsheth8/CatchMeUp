@@ -7,11 +7,14 @@ import GoogleSignInSwift
 /// Apple and Google's own buttons, wired to `AuthManager`. Used on the last
 /// onboarding page and again in Settings for anyone who skipped it there.
 ///
-/// When CatchMeUp Cloud is available, each sign-in also carries a nonce the
-/// service issued, so the identity token can be exchanged for a session there.
-/// That exchange is best-effort: the local profile is saved either way.
+/// With `cloud: true` (only the CatchMeUp Cloud section in Settings passes it),
+/// the sign-in also carries a nonce the service issued, and the identity token
+/// is exchanged for a session there. Everywhere else it never contacts the
+/// service: choosing Cloud is what sends anything to it. The exchange is
+/// best-effort, and the local profile is saved either way.
 struct SignInButtons: View {
     @Environment(AuthManager.self) private var auth
+    var cloud = false
     var onDone: () -> Void = {}
 
     /// A server-issued, single-use nonce, fetched ahead of the tap because
@@ -23,13 +26,13 @@ struct SignInButtons: View {
             SignInWithAppleButton(.signIn) { request in
                 request.requestedScopes = [.fullName, .email]
                 // Apple wants the SHA-256 of the nonce; the service accepts that form.
-                if let nonce { request.nonce = Self.sha256Hex(nonce) }
+                if cloud, let nonce { request.nonce = Self.sha256Hex(nonce) }
             } onCompletion: { result in
                 guard case .success(let authorization) = result,
                       let credential = authorization.credential as? ASAuthorizationAppleIDCredential
                 else { return }
                 auth.completeAppleSignIn(credential)
-                if let used = nonce,
+                if cloud, let used = nonce,
                    let data = credential.identityToken,
                    let token = String(data: data, encoding: .utf8) {
                     exchange(.apple, idToken: token, nonce: used)
@@ -50,7 +53,7 @@ struct SignInButtons: View {
             .compactMap({ $0 as? UIWindowScene })
             .first?.windows.first(where: \.isKeyWindow)?.rootViewController
         else { return }
-        let used = nonce
+        let used = cloud ? nonce : nil
         GIDSignIn.sharedInstance.signIn(
             withPresenting: root, hint: nil, additionalScopes: nil, nonce: used
         ) { result, error in
@@ -64,7 +67,7 @@ struct SignInButtons: View {
     }
 
     private func prepareNonce() async {
-        guard HostedConfig.isConfigured else { return }
+        guard cloud, HostedConfig.isConfigured else { return }
         nonce = try? await HostedSession.shared.fetchNonce()
     }
 

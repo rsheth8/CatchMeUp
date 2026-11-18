@@ -213,6 +213,43 @@ final class HostedSessionTests: XCTestCase {
         XCTAssertLessThanOrEqual(StubProtocol.calls.count, 4)
     }
 
+    func testASlowRefreshCannotBringBackASessionThatWasSignedOut() async throws {
+        var releaseRefresh: (() -> Void)?
+        StubProtocol.reset { seen in
+            if seen.path == "/v1/auth/refresh" {
+                let gate = DispatchSemaphore(value: 0)
+                releaseRefresh = { gate.signal() }
+                _ = gate.wait(timeout: .now() + 3)
+                return (200, ["accessToken": "late-token", "expiresIn": 3600])
+            }
+            return (200, ["text": "ok", "quota": self.quota])
+        }
+        let session = makeSession()
+        let inFlight = Task { try await session.complete(purpose: .answer, jobID: nil, system: "s", user: "u", maxTokens: 1) }
+        while StubProtocol.calls.filter({ $0.path == "/v1/auth/refresh" }).isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+
+        await session.signOut()          // while the refresh is still out
+        releaseRefresh?()
+        _ = try? await inFlight.value
+
+        XCTAssertFalse(session.isSignedIn)
+        XCTAssertNil(store.get("hosted.refresh"))
+        XCTAssertTrue(StubProtocol.calls.filter { $0.path == "/v1/recap" }.isEmpty, "the late token must never be used")
+    }
+
+    func testSigningOutClearsLocalStateBeforeTheServerIsTold() async {
+        var signedInWhenServerWasTold: Bool?
+        var sessionRef: HostedSession?
+        StubProtocol.reset { seen in
+            if seen.path == "/v1/auth/logout" { DispatchQueue.main.sync { signedInWhenServerWasTold = sessionRef?.isSignedIn } }
+            return (200, ["ok": true])
+        }
+        let session = makeSession()
+        sessionRef = session
+        await session.signOut()
+        XCTAssertEqual(signedInWhenServerWasTold, false)
+    }
+
     // MARK: Errors
 
     func testTheMonthlyLimitOpensThePaywallOnceAndZeroesTheCount() async {

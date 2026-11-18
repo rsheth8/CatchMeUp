@@ -72,7 +72,9 @@ struct SettingsView: View {
                     Text("Who writes the notes")
                 }
 
-                if settings.engineKind == .hosted {
+                // Also shown when signed in to Cloud but using another engine, so the
+                // account can always be signed out of or deleted.
+                if settings.engineKind == .hosted || HostedSession.shared.isSignedIn {
                     HostedAccountSection(ui: hostedUI)
                 }
 

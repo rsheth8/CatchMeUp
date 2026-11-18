@@ -1,0 +1,29 @@
+{
+  "name": "catchmeup-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hosted recap API for CatchMeUp: verified sign-in, per-user quotas, hard spend limits.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node scripts/e2e.mjs",
+    "migrate:local": "wrangler d1 migrations apply catchmeup --local",
+    "migrate:remote": "wrangler d1 migrations apply catchmeup --remote"
+  },
+  "dependencies": {
+    "jose": "^6.2.17"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.4",
+    "@cloudflare/workers-types": "^5.20261118.1",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.164.0"
+  }
+}

@@ -1,0 +1,37 @@
+name = "catchmeup-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Everything below is non-secret configuration. Secrets (ANTHROPIC_API_KEY,
+# SESSION_SECRET) are set with `wrangler secret put`, never written here.
+[vars]
+# Sign in with Apple: the app's bundle id.
+APPLE_AUDIENCE = "com.catchmeup.app"
+APPLE_ISSUER = "https://appleid.apple.com"
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+# Google: the iOS OAuth client id (GIDClientID in Info.plist). Set before deploy.
+GOOGLE_AUDIENCE = ""
+GOOGLE_ISSUERS = "https://accounts.google.com,accounts.google.com"
+GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+# The server, not the app, chooses the model. It must have a price in
+# src/pricing.ts, otherwise requests fail closed.
+RECAP_MODEL = "claude-sonnet-5-5"
+RECAP_EFFORT = "medium"
+
+# Hard ceilings. The per-user quotas live in src/plans.ts.
+GLOBAL_DAILY_BUDGET_USD = "25"
+MAX_INPUT_CHARS = "150000"
+MAX_OUTPUT_TOKENS = "16000"
+RATE_LIMIT_PER_MINUTE = "10"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "catchmeup"
+# Replace with the id printed by `wrangler d1 create catchmeup`.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[observability]
+enabled = true

@@ -601,6 +601,42 @@ describe("a recap is one recording, not one model call", () => {
     expect(statuses.slice(40)).toEqual([429, 429]);
   });
 
+  it("caps the total prompt text a recording can send, however its calls are labelled", async () => {
+    const { app, recap, session } = await setup({ RECAP_MODEL_PLUS: "claude-haiku-5-5" });
+    await grantPlus(session.userId, START + 30 * 86_400_000);
+    const jobId = "one-big-recording";
+    const statuses: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      statuses.push((await recap({ ...RECAP_BODY, jobId, user: "x".repeat(190_000) })).status);
+    }
+    // 1,500,000 bytes of input allowed: seven 190,001-byte calls fit, the eighth does not.
+    expect(statuses.filter((s) => s === 200)).toHaveLength(7);
+    const refused = await recap({ ...RECAP_BODY, jobId, user: "x".repeat(190_000) });
+    expect(refused.status).toBe(429);
+    expect(refused.json.error.code).toBe("job_limit");
+    // The allowance is in bytes, so a small follow-up still fits in what is left.
+    expect((await recap({ ...RECAP_BODY, jobId, user: "tiny" })).status).toBe(200);
+    expect(app.net.upstreamCalls).toHaveLength(8);
+  });
+
+  it("limits calls that carry no job id, so a recap cannot be relabelled as a question for free", async () => {
+    const { app, recap } = await setup({ RECAP_MODEL_FREE: "claude-haiku-5-5", RATE_LIMIT_PER_MINUTE: "1000" });
+    for (let i = 0; i < 25; i++) expect((await recap({ ...RECAP_BODY, task: "answer" })).status).toBe(200);
+    const res = await recap({ ...RECAP_BODY, task: "answer" });
+    expect(res.status).toBe(429);
+    expect(res.json.error.code).toBe("other_limit");
+    expect(app.net.upstreamCalls).toHaveLength(25);
+    // A real recording is unaffected.
+    expect((await recap()).status).toBe(200);
+  });
+
+  it("gives Plus a larger allowance for calls without a job id", async () => {
+    const { app, recap, session } = await setup({ RECAP_MODEL_PLUS: "claude-haiku-5-5", RATE_LIMIT_PER_MINUTE: "1000" });
+    await grantPlus(session.userId, START + 30 * 86_400_000);
+    for (let i = 0; i < 30; i++) expect((await recap({ ...RECAP_BODY, task: "answer" })).status).toBe(200);
+    expect(app.net.upstreamCalls).toHaveLength(30);
+  });
+
   it("does not use up a recap on questions, answers or grading, only budget", async () => {
     const { app, recap, session } = await setup();
     for (const task of ["answer", "questions", "materials", "other", "answer"]) {

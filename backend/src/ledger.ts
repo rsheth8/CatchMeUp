@@ -19,7 +19,7 @@ export function dayOf(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 10);
 }
 
-export type Rejection = "rate_limited" | "quota_exceeded" | "job_limit" | "request_in_flight" | "service_busy";
+export type Rejection = "rate_limited" | "quota_exceeded" | "job_limit" | "other_limit" | "request_in_flight" | "service_busy";
 
 export interface ReserveInput {
   id: string;
@@ -37,6 +37,9 @@ export interface ReserveInput {
    */
   jobId: string | null;
   maxCallsPerJob: number;
+  /** UTF-8 size of this call's prompt, and the most a single job may send in a month. */
+  inputBytes: number;
+  maxJobInputBytes: number;
 }
 
 // What a row costs against a budget: its real cost once finished (failed calls
@@ -59,14 +62,15 @@ const RECAP_JOBS = `COUNT(DISTINCT CASE
  *   ?1 id  ?2 user  ?3 period  ?4 day  ?5 task  ?6 model  ?7 reserve  ?8 now
  *   ?9 pending cutoff  ?10 user budget  ?11 max recaps  ?12 global budget
  *   ?13 rate window start  ?14 max requests in the window
- *   ?15 job id or null  ?16 max calls per job
+ *   ?15 job id or null  ?16 max calls per job  ?17 this prompt's bytes
+ *   ?18 max input bytes per job  ?19 max calls with no job id
  */
 export async function reserve(db: D1Database, input: ReserveInput): Promise<boolean> {
   const { nowMs } = input;
   const result = await db
     .prepare(
-      `INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at, job_id)
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?15
+      `INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at, job_id, input_bytes)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?15, ?17
        WHERE (SELECT ${SPEND} FROM ledger WHERE user_id = ?2 AND period = ?3) + ?7 <= ?10
          AND (?15 IS NULL
               OR EXISTS (SELECT 1 FROM ledger WHERE user_id = ?2 AND period = ?3 AND job_id = ?15
@@ -74,6 +78,11 @@ export async function reserve(db: D1Database, input: ReserveInput): Promise<bool
               OR (SELECT ${RECAP_JOBS} FROM ledger WHERE user_id = ?2 AND period = ?3) < ?11)
          AND (?15 IS NULL
               OR (SELECT COUNT(*) FROM ledger WHERE user_id = ?2 AND period = ?3 AND job_id = ?15) < ?16)
+         AND (?15 IS NULL
+              OR (SELECT COALESCE(SUM(input_bytes), 0) FROM ledger WHERE user_id = ?2 AND period = ?3 AND job_id = ?15) + ?17 <= ?18)
+         AND (?15 IS NOT NULL
+              OR (SELECT COUNT(*) FROM ledger WHERE user_id = ?2 AND period = ?3 AND job_id IS NULL
+                  AND (status = 'settled' OR (status = 'pending' AND created_at > ?9))) < ?19)
          AND (SELECT ${SPEND} FROM ledger WHERE day = ?4) + ?7 <= ?12
          AND (SELECT COUNT(*) FROM ledger WHERE user_id = ?2 AND created_at > ?13) < ?14`,
     )
@@ -94,6 +103,9 @@ export async function reserve(db: D1Database, input: ReserveInput): Promise<bool
       input.rateLimitPerMinute,
       input.jobId,
       input.maxCallsPerJob,
+      input.inputBytes,
+      input.maxJobInputBytes,
+      input.plan.otherCallsPerMonth,
     )
     .run();
   return (result.meta.changes ?? 0) === 1;
@@ -131,16 +143,27 @@ export async function diagnose(db: D1Database, input: ReserveInput): Promise<Rej
     .first<{ spent: number; pending: number; doneJobs: number; liveJobs: number }>();
   const spent = user?.spent ?? 0;
 
+  if (!input.jobId) {
+    const others = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM ledger WHERE user_id = ?1 AND period = ?2 AND job_id IS NULL
+         AND (status = 'settled' OR (status = 'pending' AND created_at > ?3))`,
+      )
+      .bind(input.userId, period, cutoff)
+      .first<{ n: number }>();
+    if ((others?.n ?? 0) >= input.plan.otherCallsPerMonth) return "other_limit";
+  }
   if (input.jobId) {
     const job = await db
       .prepare(
-        `SELECT COUNT(*) AS calls,
+        `SELECT COUNT(*) AS calls, COALESCE(SUM(input_bytes), 0) AS bytes,
                 COUNT(CASE WHEN status = 'settled' OR (status = 'pending' AND created_at > ?4) THEN 1 END) AS live
          FROM ledger WHERE user_id = ?1 AND period = ?2 AND job_id = ?3`,
       )
       .bind(input.userId, period, input.jobId, cutoff)
-      .first<{ calls: number; live: number }>();
+      .first<{ calls: number; bytes: number; live: number }>();
     if ((job?.calls ?? 0) >= input.maxCallsPerJob) return "job_limit";
+    if ((job?.bytes ?? 0) + input.inputBytes > input.maxJobInputBytes) return "job_limit";
     // A recording already counted as a recap can keep going; only a new one is checked against the count.
     if ((job?.live ?? 0) === 0) {
       // Finished recaps use the month up for good. Ones still running might fail, so wait for them.

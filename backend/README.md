@@ -71,10 +71,18 @@ several windows and makes a follow-up call for meeting insights. Calls with task
 `recap` or `meeting` carry a `jobId`, and the monthly recap count is the number of
 distinct job ids with a finished call, so all of one recording's calls are one
 recap, and a retry of a recording that already counted is free. A job id can make
-at most 40 calls a month (`MAX_CALLS_PER_JOB`), so a reused id is not unlimited.
-Other tasks (`answer`, `questions`, `materials`, `other`) carry no job id: they
-use dollars from the budget but not a recap, so free users can keep asking
-questions about notes they already have until the safety-net budget runs out.
+at most 40 calls and 1.5 MB of prompt text a month (`MAX_CALLS_PER_JOB`,
+`MAX_JOB_INPUT_BYTES`). Other tasks (`answer`, `questions`, `materials`, `other`)
+carry no job id: they use dollars from the budget but not a recap, and are capped
+at 25 a month on free and 600 on Plus.
+
+The job id and the task label come from the client, so a modified app can lie about
+them. The server cannot tell a recap from a question by its text. What holds
+regardless is the dollar budget per account and the global daily budget; the
+per-job byte cap and the allowance for unlabelled calls keep a lie from being worth
+more than about one extra recording. Closing this fully means the server owning the
+prompt templates, so a task label is something the server chose, not the app. That
+is a larger change and is not done.
 
 Plans live in `src/plans.ts`:
 
@@ -97,7 +105,7 @@ unmetered.
 ```bash
 cd backend
 npm install            # Node 20+
-npm test               # 115 tests in the real Workers runtime, no network
+npm test               # 118 tests in the real Workers runtime, no network
 npm run typecheck
 npm run e2e            # local Worker + local database, model stubbed
 ```

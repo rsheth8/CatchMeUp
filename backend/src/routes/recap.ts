@@ -3,7 +3,7 @@ import { loadConfig } from "../config";
 import { requireUser, type Ctx } from "../context";
 import { ApiError, json, log, readJsonObject, stringField } from "../http";
 import { diagnose, fail, reserve, settle, type Rejection } from "../ledger";
-import { MAX_CALLS_PER_JOB, nextPeriodStart } from "../plans";
+import { MAX_CALLS_PER_JOB, MAX_JOB_INPUT_BYTES, nextPeriodStart } from "../plans";
 import { costMicro, effectiveMaxTokens, inputOnlyMicro, reserveMicro } from "../pricing";
 import { planFor, quotaFor } from "../users";
 
@@ -18,6 +18,7 @@ const RECAP_TASKS = new Set(["recap", "meeting"]);
 const REJECTIONS: Record<Rejection, { status: number; message: string }> = {
   quota_exceeded: { status: 402, message: "You have used this month's recaps." },
   job_limit: { status: 429, message: "This recording has used its processing allowance for the month." },
+  other_limit: { status: 429, message: "You've reached this month's limit on questions and other requests." },
   rate_limited: { status: 429, message: "Too many requests. Wait a minute and try again." },
   request_in_flight: { status: 429, message: "Another request is still running. Try again in a moment." },
   service_busy: { status: 503, message: "CatchMeUp Cloud is at capacity right now. Try again later, or use on-device mode." },
@@ -78,6 +79,8 @@ export async function recap(request: Request, ctx: Ctx): Promise<Response> {
     rateLimitPerMinute: cfg.rateLimitPerMinute,
     jobId,
     maxCallsPerJob: MAX_CALLS_PER_JOB,
+    inputBytes,
+    maxJobInputBytes: MAX_JOB_INPUT_BYTES,
   };
 
   if (!(await reserve(ctx.env.DB, reservation))) {

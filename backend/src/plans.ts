@@ -6,6 +6,12 @@ export interface Plan {
   recapsPerMonth: number;
   /** Hard cap on API spend per month, in micro-dollars. This is the real limit. */
   budgetMicro: number;
+  /**
+   * Calls that carry no job id (questions, answers, grading) per month. They do
+   * not use a recap, but a modified client could label a recap as one, so they
+   * are counted and capped too, each also held to the per-request input cap.
+   */
+  otherCallsPerMonth: number;
 }
 
 /**
@@ -27,9 +33,18 @@ export interface Plan {
  */
 export const MAX_CALLS_PER_JOB = 40;
 
+/**
+ * The most prompt text one job id can send in a month. The id is chosen by the
+ * client, so this is what stops a reused id from being unlimited recaps: a job
+ * is worth about one long recording's worth of text, however its calls are
+ * labelled. A 3-hour recording is roughly 170 KB of transcript, sent once for
+ * notes, again for any retry, and once more for meeting insights.
+ */
+export const MAX_JOB_INPUT_BYTES = 1_500_000;
+
 export const PLANS: Record<PlanId, Plan> = {
-  free: { id: "free", recapsPerMonth: 3, budgetMicro: 600_000 },
-  plus: { id: "plus", recapsPerMonth: 200, budgetMicro: 3_700_000 },
+  free: { id: "free", recapsPerMonth: 3, budgetMicro: 600_000, otherCallsPerMonth: 25 },
+  plus: { id: "plus", recapsPerMonth: 200, budgetMicro: 3_700_000, otherCallsPerMonth: 600 },
 };
 
 /** Measured mean cost of a recap on the default model (ios/Bench, 9 recordings). */

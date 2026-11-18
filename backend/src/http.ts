@@ -27,15 +27,41 @@ export function errorResponse(error: ApiError): Response {
  * declared length and from what actually arrived, so a missing or lying
  * Content-Length cannot get past it.
  */
-export async function readJsonObject(request: Request, maxBytes: number): Promise<Record<string, unknown>> {
+/**
+ * Reads the body as text, counting bytes as they arrive and stopping the
+ * moment the limit is passed. A chunked upload with no Content-Length, or a
+ * lying one, therefore cannot make the Worker buffer more than `maxBytes`.
+ */
+export async function readBodyText(request: Request, maxBytes: number): Promise<string> {
+  const tooLarge = () => new ApiError(413, "payload_too_large", "The request is too large.");
   const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new ApiError(413, "payload_too_large", "The request is too large.");
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    chunks.push(value);
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).length > maxBytes) {
-    throw new ApiError(413, "payload_too_large", "The request is too large.");
+  const all = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, offset);
+    offset += chunk.byteLength;
   }
+  return new TextDecoder().decode(all);
+}
+
+export async function readJsonObject(request: Request, maxBytes: number): Promise<Record<string, unknown>> {
+  const text = await readBodyText(request, maxBytes);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

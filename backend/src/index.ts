@@ -2,13 +2,14 @@ import type { Ctx } from "./context";
 import { defaultDeps, type Deps, type Env } from "./env";
 import { ApiError, errorResponse, json, log } from "./http";
 import { makeVerifier } from "./idtoken";
-import { logout, refresh, signIn } from "./routes/auth";
+import { logout, nonce, refresh, signIn } from "./routes/auth";
 import { deleteMe, getMe } from "./routes/me";
 import { recap } from "./routes/recap";
 
 type Handler = (request: Request, ctx: Ctx) => Promise<Response>;
 
 const ROUTES: Record<string, Handler> = {
+  "POST /v1/auth/nonce": nonce,
   "POST /v1/auth/apple": (r, c) => signIn("apple", r, c),
   "POST /v1/auth/google": (r, c) => signIn("google", r, c),
   "POST /v1/auth/refresh": refresh,
@@ -27,7 +28,7 @@ export function makeHandler(overrides: Partial<Deps> = {}): ExportedHandler<Env>
   const verifiers = new WeakMap<Env, ReturnType<typeof makeVerifier>>();
 
   return {
-    async fetch(request, env) {
+    async fetch(request, env, execution) {
       const url = new URL(request.url);
       const requestId = request.headers.get("cf-ray") ?? crypto.randomUUID();
       try {
@@ -46,7 +47,14 @@ export function makeHandler(overrides: Partial<Deps> = {}): ExportedHandler<Env>
           verifier = makeVerifier(env, deps);
           verifiers.set(env, verifier);
         }
-        return await handler(request, { env, deps, verifier, now: deps.now(), requestId });
+        return await handler(request, {
+          env,
+          deps,
+          verifier,
+          now: deps.now(),
+          requestId,
+          waitUntil: (work) => execution.waitUntil(work),
+        });
       } catch (error) {
         if (error instanceof ApiError) return errorResponse(error);
         // Anything else is a bug. Log the type only: messages can carry user text.

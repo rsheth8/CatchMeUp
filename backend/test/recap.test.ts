@@ -189,36 +189,79 @@ describe("spend limits", () => {
     let release!: () => void;
     app.net.gate = new Promise<void>((resolve) => (release = resolve));
 
-    // Free budget is $0.40 and each reservation is about $0.16, so two fit.
+    // Free budget is $0.60 and each reservation is about $0.16, so three fit.
     const inFlight = Promise.all([recap(), recap(), recap(), recap()]);
     await new Promise((r) => setTimeout(r, 150));
     release();
     const results = await inFlight;
 
-    expect(results.map((r) => r.status).sort()).toEqual([200, 200, 429, 429]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 200, 200, 429]);
     expect(results.filter((r) => r.status === 429).every((r) => r.json.error.code === "request_in_flight")).toBe(true);
     const rows = await ledgerRows();
-    expect(rows.filter((r) => r.status === "settled")).toHaveLength(2);
+    expect(rows.filter((r) => r.status === "settled")).toHaveLength(3);
     expect(rows.filter((r) => r.status === "pending")).toHaveLength(0);
   });
 
-  it("frees a reservation left behind by a request that died, after ten minutes", async () => {
+  it("treats a reservation from a request that died as no longer in flight after ten minutes", async () => {
     const { app, session, recap } = await setup();
-    const insert = (id: string, createdAt: number) =>
+    const insert = (id: string, createdAt: number, reserved = 390_000) =>
       db()
-        .prepare("INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at) VALUES (?1, ?2, '2026-11', '2026-11-18', 'recap', 'claude-sonnet-5-5', 'pending', 390000, ?3)")
-        .bind(id, session.userId, createdAt)
+        .prepare("INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at) VALUES (?1, ?2, '2026-11', '2026-11-18', 'recap', 'claude-sonnet-5-5', 'pending', ?3, ?4)")
+        .bind(id, session.userId, reserved, createdAt)
         .run();
 
-    await insert("fresh", START - 60_000);
+    // 0.45 + 0.16 would pass a $0.60 budget only if the 0.45 were released.
+    await insert("fresh", START - 60_000, 450_000);
     const blocked = await recap();
     expect(blocked.status).toBe(429);
     expect(blocked.json.error.code).toBe("request_in_flight");
 
     await db().prepare("DELETE FROM ledger").run();
-    await insert("stale", START - 11 * 60_000);
+    await insert("stale", START - 11 * 60_000, 390_000);
     expect((await recap()).status).toBe(200);
     expect(app.net.upstreamCalls).toHaveLength(1);
+  });
+
+  it("keeps charging an orphaned reservation at its worst case, so walking away is never free", async () => {
+    const { app, session, recap } = await setup();
+    await db()
+      .prepare("INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at) VALUES ('orphan', ?1, '2026-11', '2026-11-18', 'recap', 'claude-sonnet-5-5', 'pending', 500000, ?2)")
+      .bind(session.userId, START - 11 * 60_000)
+      .run();
+    // 0.50 already held plus 0.16 for this call is over the free $0.60 budget.
+    const res = await recap();
+    expect(res.status).toBe(402);
+    expect(res.json.error.code).toBe("quota_exceeded");
+    expect(app.net.upstreamCalls).toHaveLength(0);
+  });
+
+  it("counts an orphaned reservation against the global daily budget too", async () => {
+    const { app, session, recap } = await setup({ GLOBAL_DAILY_BUDGET_USD: "0.30" });
+    const other = await app.signInApple("other-user");
+    await db()
+      .prepare("INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at) VALUES ('orphan', ?1, '2026-11', '2026-11-18', 'recap', 'claude-sonnet-5-5', 'pending', 200000, ?2)")
+      .bind(other.userId, START - 11 * 60_000)
+      .run();
+    const res = await recap(RECAP_BODY, session.accessToken);
+    expect(res.status).toBe(503);
+    expect(res.json.error.code).toBe("service_busy");
+  });
+
+  it("reserves from the prompt's byte size, so a bigger prompt is held against more budget", async () => {
+    const { app, recap } = await setup();
+    await recap({ ...RECAP_BODY, user: "x".repeat(120_000) });
+    const [row] = await ledgerRows();
+    // (120,001 bytes + 1,000 framing) x $2/M + 16,000 x $10/M
+    expect(row!.reserved_micro).toBe(121_001 * 2 + 160_000);
+    expect(app.net.upstreamCalls).toHaveLength(1);
+  });
+
+  it("refuses a prompt whose worst case the free budget cannot cover, before calling the model", async () => {
+    // With the cap raised, 250,000 bytes reserves about $0.50 of input plus $0.16 of output.
+    const { app, recap } = await setup({ MAX_INPUT_BYTES: "400000" });
+    const res = await recap({ ...RECAP_BODY, user: "x".repeat(250_000) });
+    expect(res.status).toBe(402);
+    expect(app.net.upstreamCalls).toHaveLength(0);
   });
 });
 
@@ -251,6 +294,42 @@ describe("when the model call fails", () => {
     app.net.upstream = [{ status: 400, body: { error: "bad" } }];
     expect((await recap()).status).toBe(502);
     expect(app.net.upstreamCalls).toHaveLength(1);
+  });
+
+  it("does not retry a call that timed out, and charges its full reservation", async () => {
+    const { app, recap, session } = await setup();
+    app.net.upstream = [{ status: 200, body: okBody(), throws: "timeout" }];
+    const res = await recap();
+    expect(res.status).toBe(502);
+    expect(app.net.upstreamCalls).toHaveLength(1); // a second try could be billed unmetered
+
+    const [row] = await ledgerRows();
+    expect(row).toMatchObject({ status: "failed" });
+    expect(row!.cost_micro).toBe(row!.reserved_micro);
+    expect(row!.cost_micro).toBeGreaterThan(0);
+    const me = await app.call("GET", "/v1/me", { token: session.accessToken });
+    expect(me.json.quota.recapsRemaining).toBe(3); // not a recap, but the dollars stay spent
+  });
+
+  it("does not retry a dropped connection, and charges the input side", async () => {
+    const { app, recap } = await setup();
+    app.net.upstream = [{ status: 200, body: okBody(), throws: "network" }];
+    const res = await recap();
+    expect(res.status).toBe(502);
+    expect(app.net.upstreamCalls).toHaveLength(1);
+
+    const [row] = await ledgerRows();
+    expect(row).toMatchObject({ status: "failed", cost_micro: (2 + 1_000) * 2 }); // 2 bytes + framing at $2/M
+  });
+
+  it("stops serving a user whose timeouts have used the dollar budget", async () => {
+    const { app, recap } = await setup();
+    app.net.upstream = [{ status: 200, body: okBody(), throws: "timeout" }];
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) statuses.push((await recap()).status);
+    // Each timeout costs about $0.16 of the $0.60 free budget: three run, then it is closed.
+    expect(statuses).toEqual([502, 502, 502, 402, 402]);
+    expect(app.net.upstreamCalls).toHaveLength(3);
   });
 
   it("reports a model that stays overloaded as busy, with a retry hint", async () => {
@@ -315,16 +394,62 @@ describe("request checks", () => {
   });
 
   it("refuses input longer than the limit", async () => {
-    const { app, recap } = await setup({ MAX_INPUT_CHARS: "1000" });
+    const { app, recap } = await setup({ MAX_INPUT_BYTES: "1000" });
     const res = await recap({ ...RECAP_BODY, user: "x".repeat(2_000) });
+    expect(res.status).toBe(413);
+    expect(res.json.error.code).toBe("input_too_large");
+    expect(app.net.upstreamCalls).toHaveLength(0);
+    expect(await ledgerRows()).toHaveLength(0);
+  });
+
+  it("counts the limit in UTF-8 bytes, not characters", async () => {
+    const { app, recap } = await setup({ MAX_INPUT_BYTES: "1000" });
+    // 400 characters, 1,200 bytes: under a character limit, over the byte limit.
+    const res = await recap({ ...RECAP_BODY, user: "講".repeat(400) });
+    expect(res.status).toBe(413);
+    expect(app.net.upstreamCalls).toHaveLength(0);
+    expect((await recap({ ...RECAP_BODY, user: "講".repeat(100) })).status).toBe(200);
+  });
+
+  it("adds the system prompt and the user text together", async () => {
+    const { app, recap } = await setup({ MAX_INPUT_BYTES: "1000" });
+    const res = await recap({ ...RECAP_BODY, system: "s".repeat(600), user: "u".repeat(600) });
     expect(res.status).toBe(413);
     expect(app.net.upstreamCalls).toHaveLength(0);
   });
 
   it("refuses an oversized body outright", async () => {
-    const { app, session } = await setup({ MAX_INPUT_CHARS: "1000" });
+    const { app, session } = await setup({ MAX_INPUT_BYTES: "1000" });
     const res = await app.call("POST", "/v1/recap", { raw: JSON.stringify({ ...RECAP_BODY, user: "x".repeat(50_000) }), token: session.accessToken });
     expect(res.status).toBe(413);
+  });
+
+  it("stops reading a body that is bigger than it claims, without buffering it all", async () => {
+    const { app, session } = await setup({ MAX_INPUT_BYTES: "1000" });
+    // No content-length is sent for a stream, so only the streaming cap can stop this.
+    const chunk = new TextEncoder().encode("x".repeat(8_192));
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += chunk.length;
+        controller.enqueue(chunk);
+        if (sent > 5_000_000) controller.close();
+      },
+    });
+    const response = await (await import("../src/index")).makeHandler({ fetch: app.net.fetch, now: () => app.clock.now, sleep: async () => {} }).fetch!(
+      new Request("https://api.test/v1/recap", {
+        method: "POST",
+        headers: { authorization: `Bearer ${session.accessToken}`, "content-type": "application/json" },
+        body: stream,
+        // @ts-expect-error duplex is required for stream bodies and missing from the DOM types
+        duplex: "half",
+      }) as any,
+      app.env,
+      { waitUntil() {}, passThroughOnException() {} } as any,
+    );
+    expect(response.status).toBe(413);
+    expect(sent).toBeLessThan(1_000_000);
+    expect(app.net.upstreamCalls).toHaveLength(0);
   });
 
   it("caps maxTokens at the server's ceiling", async () => {

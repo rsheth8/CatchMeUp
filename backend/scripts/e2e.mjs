@@ -55,12 +55,15 @@ const fake = createServer((req, res) => {
     let data = "";
     req.on("data", (c) => (data += c));
     req.on("end", () => {
-      upstreamSeen.push({ headers: req.headers, body: JSON.parse(data) });
-      send(200, {
+      const parsed = JSON.parse(data);
+      upstreamSeen.push({ headers: req.headers, body: parsed });
+      // A prompt starting with SLOW takes a few seconds, to leave time for a client to hang up.
+      const delay = parsed.messages?.[0]?.content?.startsWith("SLOW") ? 4000 : 0;
+      setTimeout(() => send(200, {
         stop_reason: "end_turn",
         content: [{ type: "text", text: JSON.stringify({ title: "Stub recap", tldr: ["stubbed"] }) }],
         usage: { input_tokens: 1000, output_tokens: 500 },
-      });
+      }), delay);
     });
     return;
   }
@@ -132,8 +135,9 @@ const idToken = async (name, claims) => {
     .setIssuedAt(iat).setExpirationTime(iat + 600)
     .sign(keys[name]);
 };
-const appleToken = (overrides = {}) =>
-  idToken("apple", { iss: "https://appleid.apple.com", aud: "com.catchmeup.app", sub: "e2e-user", nonce: "e2e-nonce-0001", ...overrides });
+const appleToken = (nonce, overrides = {}) =>
+  idToken("apple", { iss: "https://appleid.apple.com", aud: "com.catchmeup.app", sub: "e2e-user", nonce, ...overrides });
+const serverNonce = async () => (await call("POST", "/v1/auth/nonce", { body: {} })).json?.nonce;
 const d1 = (sql) => {
   const r = run(["d1", "execute", "catchmeup", "--local", "--persist-to", STATE, "--json", "--command", sql]);
   try { return JSON.parse(r.stdout)[0].results; } catch { return []; }
@@ -144,11 +148,21 @@ console.log(`\nMode: ${live ? "LIVE (real Anthropic call)" : "stubbed model"}\n`
 
 check((await call("GET", "/health")).json?.ok === true, "health check");
 
-const forged = await call("POST", "/v1/auth/apple", { body: { idToken: await appleToken({ aud: "com.someone.else" }), nonce: "e2e-nonce-0001" } });
+const nonce = await serverNonce();
+check(typeof nonce === "string" && nonce.split(".").length === 3, "server issues a signed sign-in nonce");
+
+const forged = await call("POST", "/v1/auth/apple", { body: { idToken: await appleToken(nonce, { aud: "com.someone.else" }), nonce } });
 check(forged.status === 401, "token for another app is rejected", `status ${forged.status}`);
 
-const signedIn = await call("POST", "/v1/auth/apple", { body: { idToken: await appleToken(), nonce: "e2e-nonce-0001" } });
-check(signedIn.status === 200 && !!signedIn.json?.accessToken, "valid Apple sign-in", `status ${signedIn.status}`);
+const invented = "client-invented-nonce-0001";
+const inventedRes = await call("POST", "/v1/auth/apple", { body: { idToken: await appleToken(invented), nonce: invented } });
+check(inventedRes.status === 401, "a nonce the server did not issue is rejected", `status ${inventedRes.status}`);
+
+const signInBody = { idToken: await appleToken(nonce), nonce };
+const signedIn = await call("POST", "/v1/auth/apple", { body: signInBody });
+check(signedIn.status === 200 && !!signedIn.json?.accessToken, "valid Apple sign-in (the rejected attempts did not burn the nonce)", `status ${signedIn.status}`);
+const replay = await call("POST", "/v1/auth/apple", { body: signInBody });
+check(replay.status === 401, "replaying the same sign-in is rejected", `status ${replay.status}`);
 const token = signedIn.json?.accessToken;
 
 let me = await call("GET", "/v1/me", { token });
@@ -188,6 +202,23 @@ if (!live) {
   d1(`INSERT INTO subscriptions (user_id, product_id, status, expires_at, updated_at) VALUES ('${signedIn.json.user.id}', 'plus.monthly', 'active', ${Date.now() + 86_400_000}, ${Date.now()})`);
   const plus = await call("POST", "/v1/recap", { token, body: recapBody });
   check(plus.status === 200 && plus.json?.quota?.plan === "plus", "an active subscription lifts the limit", `plan ${plus.json?.quota?.plan}, ${plus.json?.quota?.recapsRemaining} left`);
+}
+
+if (!live) {
+  // A phone that loses signal mid-recap must not leave an unmetered model call behind.
+  const hangUp = new AbortController();
+  const slow = fetch(`${base}/v1/recap`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...recapBody, user: "SLOW " + transcript }),
+    signal: hangUp.signal,
+  }).catch(() => null);
+  await new Promise((r) => setTimeout(r, 700));
+  hangUp.abort();
+  await slow;
+  await new Promise((r) => setTimeout(r, 6000));
+  const [last] = d1("SELECT status, cost_micro FROM ledger ORDER BY created_at DESC LIMIT 1");
+  check(last?.status === "settled" && last.cost_micro > 0, "a client that hangs up mid-request is still fully metered", JSON.stringify(last));
 }
 
 const ledger = d1("SELECT status, model, cost_micro, input_tokens, output_tokens FROM ledger ORDER BY created_at");

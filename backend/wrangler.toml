@@ -22,7 +22,9 @@ RECAP_EFFORT = "medium"
 
 # Hard ceilings. The per-user quotas live in src/plans.ts.
 GLOBAL_DAILY_BUDGET_USD = "25"
-MAX_INPUT_CHARS = "150000"
+# UTF-8 bytes of system plus user text. The app sends up to 60,000 characters per
+# window, which is up to about 180,000 bytes in a language with 3-byte characters.
+MAX_INPUT_BYTES = "200000"
 MAX_OUTPUT_TOKENS = "16000"
 RATE_LIMIT_PER_MINUTE = "10"
 

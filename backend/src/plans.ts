@@ -10,15 +10,17 @@ export interface Plan {
 
 /**
  * Free is promised as "3 recaps a month", so the count is what users hit; the
- * dollar budget is a safety net behind it. Plus is metered in dollars, because
- * cost varies about 2x with recording length, and the count is a sanity ceiling.
+ * dollar budget is a safety net behind it, sized so that one largest-possible
+ * request (about $0.56 reserved at 200 KB of text) still fits. Normal use is
+ * about $0.04 a recap, far under it. Plus is metered in dollars, because cost
+ * varies about 2x with recording length, and the count is a sanity ceiling.
  *
  * Sizing: Plus at $6.99 nets about $5.94 after Apple's 15% (Small Business
  * Program). A $3.70 budget leaves roughly $2.20 of margin at the cap, and a
  * typical student will be well under it.
  */
 export const PLANS: Record<PlanId, Plan> = {
-  free: { id: "free", recapsPerMonth: 3, budgetMicro: 400_000 },
+  free: { id: "free", recapsPerMonth: 3, budgetMicro: 600_000 },
   plus: { id: "plus", recapsPerMonth: 200, budgetMicro: 3_700_000 },
 };
 

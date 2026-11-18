@@ -19,6 +19,8 @@ export interface Upstream {
   status: number;
   body: unknown;
   headers?: Record<string, string>;
+  /** Make the call throw instead of answering: a timeout or a dropped connection. */
+  throws?: "timeout" | "network";
 }
 
 export interface RecordedCall {
@@ -62,6 +64,8 @@ export class FakeNet {
       if (this.gate) await this.gate;
       const index = Math.min(this.upstreamCalls.length - 1, this.upstream.length - 1);
       const next = this.upstream[index]!;
+      if (next.throws === "timeout") throw new DOMException("The operation timed out.", "TimeoutError");
+      if (next.throws === "network") throw new TypeError("fetch failed");
       return new Response(JSON.stringify(next.body), {
         status: next.status,
         headers: { "content-type": "application/json", ...next.headers },
@@ -76,6 +80,8 @@ export interface TestApp {
   env: Env;
   clock: { now: number };
   call: (method: string, path: string, opts?: { body?: unknown; token?: string; raw?: string }) => Promise<{ status: number; json: any; headers: Headers; text: string }>;
+  /** Asks the server for a sign-in nonce, as the app does. */
+  getNonce: () => Promise<string>;
   signInApple: (sub?: string, extra?: Record<string, unknown>) => Promise<SignedIn>;
   signInGoogle: (sub?: string) => Promise<SignedIn>;
 }
@@ -91,7 +97,7 @@ export async function migrate() {
 }
 
 export async function resetDatabase() {
-  for (const table of ["ledger", "subscriptions", "refresh_tokens", "users"]) {
+  for (const table of ["ledger", "subscriptions", "refresh_tokens", "used_nonces", "users"]) {
     await workerEnv.DB.prepare(`DELETE FROM ${table}`).run();
   }
 }
@@ -114,7 +120,7 @@ export async function makeApp(overrides: Partial<Env> = {}): Promise<TestApp> {
     RECAP_MODEL: "claude-sonnet-5-5",
     RECAP_EFFORT: "medium",
     GLOBAL_DAILY_BUDGET_USD: "25",
-    MAX_INPUT_CHARS: "150000",
+    MAX_INPUT_BYTES: "200000",
     MAX_OUTPUT_TOKENS: "16000",
     RATE_LIMIT_PER_MINUTE: "10",
     ...overrides,
@@ -154,6 +160,12 @@ export async function makeApp(overrides: Partial<Env> = {}): Promise<TestApp> {
       .sign(key);
   };
 
+  const getNonce = async () => {
+    const res = await call("POST", "/v1/auth/nonce", { body: {} });
+    if (res.status !== 200) throw new Error(`nonce failed: ${res.status} ${res.text}`);
+    return res.json.nonce as string;
+  };
+
   const finish = async (path: string, token: string, nonce: string): Promise<SignedIn> => {
     const res = await call("POST", path, { body: { idToken: token, nonce } });
     if (res.status !== 200) throw new Error(`sign-in failed: ${res.status} ${res.text}`);
@@ -165,8 +177,9 @@ export async function makeApp(overrides: Partial<Env> = {}): Promise<TestApp> {
     env,
     clock,
     call,
+    getNonce,
     signInApple: async (sub = "apple-user-1", extra = {}) => {
-      const nonce = "nonce-" + sub;
+      const nonce = await getNonce();
       const token = await idToken(net.appleKey, {
         iss: "https://appleid.apple.com",
         aud: env.APPLE_AUDIENCE,
@@ -178,7 +191,7 @@ export async function makeApp(overrides: Partial<Env> = {}): Promise<TestApp> {
       return finish("/v1/auth/apple", token, nonce);
     },
     signInGoogle: async (sub = "google-user-1") => {
-      const nonce = "nonce-" + sub;
+      const nonce = await getNonce();
       const token = await idToken(net.googleKey, {
         iss: "https://accounts.google.com",
         aud: env.GOOGLE_AUDIENCE,

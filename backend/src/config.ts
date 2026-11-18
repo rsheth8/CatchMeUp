@@ -8,7 +8,8 @@ export interface Config {
   model: string;
   effort: string | null;
   globalDailyBudgetMicro: number;
-  maxInputChars: number;
+  /** Cap on the UTF-8 size of system plus user text, which also bounds the reservation. */
+  maxInputBytes: number;
   maxOutputTokens: number;
   rateLimitPerMinute: number;
 }
@@ -37,7 +38,7 @@ export function loadConfig(env: Env): Config {
     model: env.RECAP_MODEL,
     effort: env.RECAP_EFFORT || null,
     globalDailyBudgetMicro: Math.round(positive("GLOBAL_DAILY_BUDGET_USD", env.GLOBAL_DAILY_BUDGET_USD) * 1_000_000),
-    maxInputChars: positive("MAX_INPUT_CHARS", env.MAX_INPUT_CHARS),
+    maxInputBytes: positive("MAX_INPUT_BYTES", env.MAX_INPUT_BYTES),
     maxOutputTokens: positive("MAX_OUTPUT_TOKENS", env.MAX_OUTPUT_TOKENS),
     rateLimitPerMinute: positive("RATE_LIMIT_PER_MINUTE", env.RATE_LIMIT_PER_MINUTE),
   };

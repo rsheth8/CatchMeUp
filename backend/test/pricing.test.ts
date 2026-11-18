@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AVERAGE_RECAP_MICRO, PLANS, nextPeriodStart, recapsRemaining } from "../src/plans";
-import { costMicro, effectiveMaxTokens, rateFor, reserveMicro, supportsEffort } from "../src/pricing";
+import { costMicro, effectiveMaxTokens, inputOnlyMicro, inputTokensUpperBound, rateFor, reserveMicro, supportsEffort } from "../src/pricing";
 
 describe("pricing", () => {
   it("prices a call in whole micro-dollars", () => {
@@ -36,6 +36,19 @@ describe("pricing", () => {
   it("sends effort only to models that accept it", () => {
     expect(supportsEffort("claude-sonnet-5-5")).toBe(true);
     expect(supportsEffort("claude-haiku-4-5-20251001")).toBe(false);
+  });
+
+  it("bounds input tokens by bytes, since a token is never shorter than one byte", () => {
+    expect(inputTokensUpperBound(0)).toBe(1_000);
+    expect(inputTokensUpperBound(180_000)).toBe(181_000);
+    // Dense non-English text is the worst case: 3 bytes per character at about one token each.
+    expect(inputTokensUpperBound(3 * 60_000)).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it("reserves the input bound plus all of max_tokens, and the input alone for a dropped connection", () => {
+    expect(reserveMicro("claude-sonnet-5-5", 10_000, 16_000)).toBe(11_000 * 2 + 16_000 * 10);
+    expect(inputOnlyMicro("claude-sonnet-5-5", 10_000)).toBe(11_000 * 2);
+    expect(() => inputOnlyMicro("mystery", 1)).toThrow();
   });
 
   it("reserves more than a typical call actually costs", () => {

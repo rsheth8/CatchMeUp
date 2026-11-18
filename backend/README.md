@@ -14,7 +14,8 @@ table is ready for them), App Attest, and the iOS client. See "What is left".
 | Method and path | Purpose |
 |---|---|
 | `GET /health` | Liveness, no database. |
-| `POST /v1/auth/apple` | `{idToken, nonce}` from Sign in with Apple. Returns `accessToken` (1 hour), `refreshToken` (90 days, sliding), `user`. |
+| `POST /v1/auth/nonce` | Returns `{nonce, expiresIn}`: a signed, single-use sign-in nonce (10 minutes). The app puts it in the Apple or Google request. No database write, no sign-in needed. |
+| `POST /v1/auth/apple` | `{idToken, nonce}` from Sign in with Apple, where `nonce` is the server-issued one (the token may carry it raw or as its SHA-256 hex). Accepted once only. Returns `accessToken` (1 hour), `refreshToken` (90 days, sliding), `user`. |
 | `POST /v1/auth/google` | Same, for Google. |
 | `POST /v1/auth/refresh` | `{refreshToken}` returns a new `accessToken`. |
 | `POST /v1/auth/logout` | `{refreshToken}` revokes it. |
@@ -30,7 +31,7 @@ Errors are `{error: {code, message, ...}}`. The ones the app should handle:
 | 429 `rate_limited` / `request_in_flight` | Too fast, or another request is running. | Wait and retry. |
 | 503 `service_busy` | The global daily budget is used up. | Offer on-device mode. |
 | 503 `model_busy` | The provider is overloaded. | Retry shortly. |
-| 413 `input_too_large` | Prompt over `MAX_INPUT_CHARS`. | Split the recording. |
+| 413 `input_too_large` | System plus user text over `MAX_INPUT_BYTES` (UTF-8 bytes, not characters). | Split the recording. |
 | 422 `refused`, 502 `truncated` / `upstream_error` | The call produced nothing usable. No recap is used up. | Offer retry. |
 | 401 `unauthorized` | Token missing, expired or account deleted. | Refresh, then sign in again. |
 
@@ -42,22 +43,34 @@ provider is contacted:
 1. The server picks the model, effort and output ceiling. The caller supplies only
    prompt text, and `model` or sampling fields in a request are ignored.
 2. A single SQL statement checks all of these and takes a worst-case reservation
-   (input estimated at 2.5 characters per token, output at the full `max_tokens`):
+   (input at one token per UTF-8 byte of the prompt, an upper bound the tokenizer
+   cannot exceed, output at the full `max_tokens`):
    the user's monthly dollar budget, the user's monthly recap count, the global
    daily budget, and a per-minute request rate. Being one statement, two
    simultaneous requests cannot both squeeze under the same limit.
-3. After the call, the reservation is replaced with the real cost from the
-   provider's usage numbers. A call that fails costs no recap, but any tokens it
-   billed (a cut-off reply, a refusal) still count as spend.
-4. Usage is always summed from the `ledger` table, never kept in counters, so it
-   cannot drift. A reservation from a request that died stops counting after 10
-   minutes.
+3. The model call and its bookkeeping run under `ctx.waitUntil`, so a phone that
+   drops the connection cannot cancel the settle step. After the call, the
+   reservation is replaced with the real cost from the provider's usage numbers.
+   A call that fails costs no recap, but what it may have billed still counts as
+   spend: reported tokens exactly, a timeout at the full reservation, a dropped
+   connection at the input side, a plain 4xx or 5xx at nothing.
+4. A call that throws (timeout, dropped connection) is never retried, since a
+   second attempt could be billed on top of the first without being metered.
+   Only a provider answer that says it did no work (429, 5xx) is retried.
+5. Usage is always summed from the `ledger` table, never kept in counters, so it
+   cannot drift. A reservation whose request died stops counting as "in flight"
+   and as a recap after 10 minutes, but keeps counting as spend at its reserved
+   worst case, so abandoning requests is never free. If an operator confirms in
+   the provider's console that such a call was not billed, set its row to
+   `failed` with `cost_micro = 0`.
+6. Request bodies are read as a stream and cut off at a byte cap, so an oversized
+   upload is refused before it is buffered.
 
 Plans live in `src/plans.ts`:
 
 | | Recaps / month | Budget / month |
 |---|---|---|
-| free | 3 | $0.40 (safety net) |
+| free | 3 | $0.60 (safety net, three worst-case reservations) |
 | plus | 200 (sanity ceiling) | $3.70 |
 
 Plus is $6.99, about $5.94 after Apple's 15% (Small Business Program, which needs
@@ -74,7 +87,7 @@ unmetered.
 ```bash
 cd backend
 npm install            # Node 20+
-npm test               # 74 tests in the real Workers runtime, no network
+npm test               # 94 tests in the real Workers runtime, no network
 npm run typecheck
 npm run e2e            # local Worker + local database, model stubbed
 ```
@@ -121,7 +134,7 @@ until its price is verified, so selecting it fails closed.
 
 ## What is left
 
-1. **iOS client** (`HostedRecapEngine`, sign-in token exchange with a nonce, quota UI, paywall, error states). The app currently sends no nonce, and the server requires one.
+1. **iOS client** (`HostedRecapEngine`, sign-in token exchange, quota UI, paywall, error states). The app must call `POST /v1/auth/nonce` first and pass that nonce to Apple and Google; the server rejects any nonce it did not issue.
 2. **Subscriptions.** StoreKit 2 products, then App Store Server Notifications V2 into `subscriptions` (JWS signature verification, renewals, refunds, grace periods).
 3. **App Attest**, to bind free quota to a genuine install and make farming accounts expensive.
 4. **Privacy.** Transcripts now leave the device. The privacy policy, App Privacy answers, `PrivacyInfo.xcprivacy` and in-app wording must change before any public build.

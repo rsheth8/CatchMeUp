@@ -7,16 +7,29 @@ import {
   revokeRefreshToken,
   useRefreshToken,
 } from "../session";
+import { consumeNonce, issueNonce, NONCE_TTL_MS, verifyNonce } from "../nonce";
 import { getUser, upsertUser } from "../users";
 import { ApiError } from "../http";
+
+/** Hands the app a fresh, signed, single-use nonce to put in its sign-in request. */
+export async function nonce(_request: Request, ctx: Ctx): Promise<Response> {
+  return json({ nonce: await issueNonce(ctx.env, ctx.now), expiresIn: NONCE_TTL_MS / 1000 });
+}
 
 /** Sign in with a verified Apple or Google identity token. */
 export async function signIn(provider: Provider, request: Request, ctx: Ctx): Promise<Response> {
   const body = await readJsonObject(request, 16_384);
   const idToken = stringField(body, "idToken", { max: 8_192 });
-  const nonce = stringField(body, "nonce", { min: 8, max: 256 });
+  const nonceValue = stringField(body, "nonce", { min: 8, max: 256 });
 
-  const identity = await ctx.verifier.verify(provider, idToken, nonce);
+  // Cheap checks first: we issued this nonce and it is still fresh. Then the
+  // token, which must carry that nonce. Only then is the nonce used up, so a
+  // replayed token fails here and a bad token does not burn a good nonce.
+  await verifyNonce(ctx.env, nonceValue, ctx.now);
+  const identity = await ctx.verifier.verify(provider, idToken, nonceValue);
+  if (!(await consumeNonce(ctx.env.DB, nonceValue, ctx.now))) {
+    throw new ApiError(401, "invalid_token", "That sign-in could not be verified.");
+  }
   const user = await upsertUser(ctx.env.DB, identity, ctx.now);
   const access = await issueAccessToken(ctx.env, user.id, ctx.now);
   const refreshToken = await createRefreshToken(ctx.env.DB, user.id, ctx.now);

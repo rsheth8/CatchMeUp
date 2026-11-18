@@ -29,13 +29,11 @@ describe("sign in", () => {
     expect(me.json.user.email).toBe("g@example.com");
   });
 
-  it("accepts a nonce sent either raw or as its SHA-256 hex", async () => {
+  it("accepts the server's nonce either raw or as its SHA-256 hex in the token", async () => {
     const app = await makeApp();
-    const raw = "raw-nonce-123";
-    const hashed = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)))]
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-    for (const claim of [raw, hashed]) {
+    for (const hashed of [false, true]) {
+      const raw = await app.getNonce();
+      const claim = hashed ? await sha256Hex(raw) : raw;
       const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "n-user", nonce: claim }, app.clock.now);
       const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce: raw } });
       expect(res.status).toBe(200);
@@ -56,22 +54,24 @@ describe("sign in", () => {
   it("rejects a token with no nonce claim", async () => {
     const app = await makeApp();
     const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x" }, app.clock.now);
-    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce: "nonce-12345" } });
+    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce: await app.getNonce() } });
     expect(res.status).toBe(401);
   });
 
   it("rejects an expired token", async () => {
     const app = await makeApp();
-    const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce: "nonce-12345" }, app.clock.now - 3_600_000, 600);
-    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce: "nonce-12345" } });
+    const nonce = await app.getNonce();
+    const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce }, app.clock.now - 3_600_000, 600);
+    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce } });
     expect(res.status).toBe(401);
   });
 
   it("rejects a token signed with some other key", async () => {
     const app = await makeApp();
     // Google's key claiming to be Apple.
-    const token = await makeIdToken(app.net.googleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce: "nonce-12345" }, app.clock.now);
-    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce: "nonce-12345" } });
+    const nonce = await app.getNonce();
+    const token = await makeIdToken(app.net.googleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce }, app.clock.now);
+    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce } });
     expect(res.status).toBe(401);
   });
 
@@ -83,8 +83,9 @@ describe("sign in", () => {
 
   it("is unavailable, not open, when the provider is not configured", async () => {
     const app = await makeApp({ GOOGLE_AUDIENCE: "" });
-    const token = await makeIdToken(app.net.googleKey, { iss: "https://accounts.google.com", aud: "", sub: "x", nonce: "nonce-12345" }, app.clock.now, 600, "google-1");
-    const res = await app.call("POST", "/v1/auth/google", { body: { idToken: token, nonce: "nonce-12345" } });
+    const nonce = await app.getNonce();
+    const token = await makeIdToken(app.net.googleKey, { iss: "https://accounts.google.com", aud: "", sub: "x", nonce }, app.clock.now, 600, "google-1");
+    const res = await app.call("POST", "/v1/auth/google", { body: { idToken: token, nonce } });
     expect(res.status).toBe(503);
     expect(res.json.error.code).toBe("provider_unavailable");
   });
@@ -115,6 +116,85 @@ describe("sign in", () => {
     const a = await app.signInApple("same-sub");
     const g = await app.signInGoogle("same-sub");
     expect(a.userId).not.toBe(g.userId);
+  });
+});
+
+describe("sign-in nonces", () => {
+  it("issues a different, expiring nonce each time with no database write", async () => {
+    const app = await makeApp();
+    const a = await app.call("POST", "/v1/auth/nonce", { body: {} });
+    const b = await app.call("POST", "/v1/auth/nonce", { body: {} });
+    expect(a.status).toBe(200);
+    expect(a.json.nonce).not.toBe(b.json.nonce);
+    expect(a.json.expiresIn).toBe(600);
+    expect((await db().prepare("SELECT COUNT(*) AS n FROM used_nonces").first<{ n: number }>())!.n).toBe(0);
+  });
+
+  it("rejects a nonce the client made up, even inside a validly signed token", async () => {
+    const app = await makeApp();
+    const nonce = "client-invented-nonce-123";
+    const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce }, app.clock.now);
+    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce } });
+    expect(res.status).toBe(401);
+    expect(res.json.error.code).toBe("invalid_token");
+  });
+
+  it("rejects a nonce whose signature or expiry was altered", async () => {
+    const app = await makeApp();
+    const [random, expiry, mac] = (await app.getNonce()).split(".") as [string, string, string];
+    const tampered = [
+      `${random}.${Number(expiry) + 3_600_000}.${mac}`, // later expiry, old MAC
+      `${random}.${expiry}.${"0".repeat(mac.length)}`, // wrong MAC
+      `${random}.${expiry}`, // missing MAC
+    ];
+    for (const nonce of tampered) {
+      const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce }, app.clock.now);
+      expect((await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce } })).status).toBe(401);
+    }
+  });
+
+  it("rejects a nonce signed under a different server secret", async () => {
+    const app = await makeApp();
+    const other = await makeApp({ SESSION_SECRET: "a-completely-different-secret-value-0123456789" });
+    const nonce = await other.getNonce();
+    const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce }, app.clock.now);
+    expect((await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce } })).status).toBe(401);
+  });
+
+  it("expires a nonce after ten minutes", async () => {
+    const app = await makeApp();
+    const payload = await body(app, {});
+    app.clock.now += 10 * 60 * 1000 + 1;
+    expect((await app.call("POST", "/v1/auth/apple", { body: payload })).status).toBe(401);
+  });
+
+  it("lets a nonce be used once, so a captured token cannot be replayed", async () => {
+    const app = await makeApp();
+    const payload = await body(app, {});
+    expect((await app.call("POST", "/v1/auth/apple", { body: payload })).status).toBe(200);
+    const replay = await app.call("POST", "/v1/auth/apple", { body: payload });
+    expect(replay.status).toBe(401);
+    expect(replay.json.error.code).toBe("invalid_token");
+  });
+
+  it("does not use up a nonce on a token that fails verification", async () => {
+    const app = await makeApp();
+    const nonce = await app.getNonce();
+    const bad = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: "com.someone.else", sub: "x", nonce }, app.clock.now);
+    expect((await app.call("POST", "/v1/auth/apple", { body: { idToken: bad, nonce } })).status).toBe(401);
+    expect((await db().prepare("SELECT COUNT(*) AS n FROM used_nonces").first<{ n: number }>())!.n).toBe(0);
+
+    const good = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce }, app.clock.now);
+    expect((await app.call("POST", "/v1/auth/apple", { body: { idToken: good, nonce } })).status).toBe(200);
+  });
+
+  it("cleans up used nonces once they are past their expiry", async () => {
+    const app = await makeApp();
+    await app.signInApple("first");
+    expect((await db().prepare("SELECT COUNT(*) AS n FROM used_nonces").first<{ n: number }>())!.n).toBe(1);
+    app.clock.now += 11 * 60 * 1000;
+    await app.signInApple("second");
+    expect((await db().prepare("SELECT COUNT(*) AS n FROM used_nonces").first<{ n: number }>())!.n).toBe(1);
   });
 });
 
@@ -181,7 +261,12 @@ describe("sessions", () => {
 
   it("refuses to run with a short or missing session secret", async () => {
     const app = await makeApp({ SESSION_SECRET: "short" });
-    const res = await app.call("POST", "/v1/auth/apple", { body: await body(app, {}) });
+    // No nonce can be issued, and none can be accepted either.
+    const nonce = await app.call("POST", "/v1/auth/nonce", { body: {} });
+    expect(nonce.status).toBe(500);
+    expect(nonce.json.error.code).toBe("misconfigured");
+    const token = await makeIdToken(app.net.appleKey, { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "x", nonce: "some-nonce.1.abc" }, app.clock.now);
+    const res = await app.call("POST", "/v1/auth/apple", { body: { idToken: token, nonce: "some-nonce.1.abc" } });
     expect(res.status).toBe(500);
     expect(res.json.error.code).toBe("misconfigured");
   });
@@ -225,11 +310,17 @@ describe("account deletion", () => {
 });
 
 async function body(app: Awaited<ReturnType<typeof makeApp>>, claims: Record<string, unknown>) {
-  const nonce = "nonce-12345";
+  const nonce = await app.getNonce();
   const token = await makeIdToken(
     app.net.appleKey,
     { iss: APPLE, aud: app.env.APPLE_AUDIENCE, sub: "apple-user", nonce, ...claims } as any,
     app.clock.now,
   );
   return { idToken: token, nonce };
+}
+
+async function sha256Hex(text: string) {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

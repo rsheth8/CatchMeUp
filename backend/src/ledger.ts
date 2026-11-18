@@ -1,6 +1,14 @@
 import type { Plan } from "./plans";
 
-/** A pending reservation older than this stops counting (the request died). */
+/**
+ * A pending reservation older than this is treated as orphaned: the request
+ * died before settling. It stops holding a recap slot or showing as "in
+ * flight", but it KEEPS counting against the spend budgets at its reserved
+ * worst case. That is deliberate. The provider may have billed the call, and
+ * a reservation that quietly expired would let someone start requests and walk
+ * away from them for free. If an orphan is ever confirmed harmless in the
+ * provider's console, an operator can mark it failed with zero cost (README).
+ */
 export const PENDING_TTL_MS = 10 * 60 * 1000;
 
 export function periodOf(nowMs: number): string {
@@ -26,10 +34,11 @@ export interface ReserveInput {
 }
 
 // What a row costs against a budget: its real cost once finished (failed calls
-// can still have been billed), or its reservation while it is in flight.
+// can still have been billed), or its reservation for as long as it is pending,
+// however old. Only the recap COUNT below lets stale pending rows go.
 const SPEND = `COALESCE(SUM(CASE
   WHEN status IN ('settled', 'failed') THEN cost_micro
-  WHEN status = 'pending' AND created_at > ?9 THEN reserved_micro
+  WHEN status = 'pending' THEN reserved_micro
   ELSE 0 END), 0)`;
 const RECAPS = `COUNT(CASE
   WHEN status = 'settled' THEN 1
@@ -87,10 +96,15 @@ export async function diagnose(db: D1Database, input: ReserveInput): Promise<Rej
     .first<{ n: number }>();
   if ((recent?.n ?? 0) >= input.rateLimitPerMinute) return "rate_limited";
 
+  // "spent" includes orphaned reservations (see PENDING_TTL_MS); "pending" is
+  // only what is genuinely in flight right now.
   const user = await db
     .prepare(
       `SELECT
-         COALESCE(SUM(CASE WHEN status IN ('settled','failed') THEN cost_micro ELSE 0 END), 0) AS spent,
+         COALESCE(SUM(CASE
+           WHEN status IN ('settled','failed') THEN cost_micro
+           WHEN status = 'pending' AND created_at <= ?3 THEN reserved_micro
+           ELSE 0 END), 0) AS spent,
          COALESCE(SUM(CASE WHEN status = 'pending' AND created_at > ?3 THEN reserved_micro ELSE 0 END), 0) AS pending,
          COUNT(CASE WHEN status = 'settled' THEN 1 END) AS settledCount
        FROM ledger WHERE user_id = ?1 AND period = ?2`,
@@ -105,10 +119,13 @@ export async function diagnose(db: D1Database, input: ReserveInput): Promise<Rej
 
   const global = await db
     .prepare(
-      `SELECT COALESCE(SUM(CASE WHEN status IN ('settled','failed') THEN cost_micro ELSE 0 END), 0) AS spent
+      `SELECT COALESCE(SUM(CASE
+         WHEN status IN ('settled','failed') THEN cost_micro
+         WHEN status = 'pending' AND created_at <= ?2 THEN reserved_micro
+         ELSE 0 END), 0) AS spent
        FROM ledger WHERE day = ?1`,
     )
-    .bind(dayOf(nowMs))
+    .bind(dayOf(nowMs), cutoff)
     .first<{ spent: number }>();
   if ((global?.spent ?? 0) + input.reserveMicro > input.globalDailyBudgetMicro) return "service_busy";
 
@@ -153,13 +170,16 @@ export interface Usage {
   spentMicro: number;
 }
 
-/** This month's finished usage, for the quota the app displays. */
+/** This month's usage for the quota the app displays: finished recaps, and spend including anything still reserved. */
 export async function usageFor(db: D1Database, userId: string, nowMs: number): Promise<Usage> {
   const row = await db
     .prepare(
       `SELECT
          COUNT(CASE WHEN status = 'settled' THEN 1 END) AS recaps,
-         COALESCE(SUM(CASE WHEN status IN ('settled','failed') THEN cost_micro ELSE 0 END), 0) AS spent
+         COALESCE(SUM(CASE
+           WHEN status IN ('settled','failed') THEN cost_micro
+           WHEN status = 'pending' THEN reserved_micro
+           ELSE 0 END), 0) AS spent
        FROM ledger WHERE user_id = ?1 AND period = ?2`,
     )
     .bind(userId, periodOf(nowMs))

@@ -11,6 +11,8 @@ export interface Ctx {
   verifier: Verifier;
   now: number;
   requestId: string;
+  /** Keeps work running after the client disconnects. */
+  waitUntil: (work: Promise<unknown>) => void;
 }
 
 /** Resolves the signed-in user from the bearer token, or throws 401. */

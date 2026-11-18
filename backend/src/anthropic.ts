@@ -16,7 +16,7 @@ export interface ModelReply {
  */
 export class UpstreamFailure extends Error {
   constructor(
-    readonly kind: "refused" | "truncated" | "busy" | "http" | "network" | "bad_response",
+    readonly kind: "refused" | "truncated" | "busy" | "http" | "network" | "timeout" | "bad_response",
     message: string,
     readonly status = 0,
     readonly inputTokens = 0,
@@ -26,6 +26,8 @@ export class UpstreamFailure extends Error {
   }
 }
 
+// Only retried when the provider itself answered with one of these, meaning it
+// reports that it did not process the request.
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504, 529]);
 const ATTEMPTS = 3;
 
@@ -62,12 +64,16 @@ export async function callModel(
         body: payload,
         signal: AbortSignal.timeout(170_000),
       });
-    } catch {
-      if (attempt < ATTEMPTS) {
-        await deps.sleep(500 * attempt);
-        continue;
-      }
-      throw new UpstreamFailure("network", "Could not reach the model provider.");
+    } catch (error) {
+      // No retry: when a request throws, the provider may or may not have
+      // read it, and a second attempt could be billed on top of the first
+      // without ever being metered. A timeout in particular means the model
+      // was probably still generating, so it is charged as a full worst case.
+      const name = error instanceof Error ? error.name : "";
+      throw new UpstreamFailure(
+        name === "TimeoutError" || name === "AbortError" ? "timeout" : "network",
+        "Could not get a reply from the model provider.",
+      );
     }
 
     if (response.ok) return parseReply(await response.json().catch(() => null));

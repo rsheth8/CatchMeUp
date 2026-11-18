@@ -21,7 +21,7 @@ export interface Env {
 
   // Hard ceilings
   GLOBAL_DAILY_BUDGET_USD: string;
-  MAX_INPUT_CHARS: string;
+  MAX_INPUT_BYTES: string;
   MAX_OUTPUT_TOKENS: string;
   RATE_LIMIT_PER_MINUTE: string;
 }

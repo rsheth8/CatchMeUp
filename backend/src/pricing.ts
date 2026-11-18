@@ -56,13 +56,29 @@ export function effectiveMaxTokens(model: string, requested: number, ceiling: nu
 }
 
 /**
- * Worst case for one call, held against the budgets until the real cost is
- * known. Input is estimated pessimistically at 2.5 characters per token
- * (English is nearer 4), and output is assumed to use all of max_tokens.
+ * Input tokens are bounded above by the prompt's UTF-8 size in bytes: the
+ * tokenizer never needs more than one token per byte, because it can always
+ * fall back to raw bytes. Real English text is nearer one token per four
+ * bytes, so this over-reserves, which is the safe direction. The 1,000 covers
+ * the request's own framing.
  */
-export function reserveMicro(model: string, inputChars: number, maxTokens: number): number {
+export function inputTokensUpperBound(inputBytes: number): number {
+  return inputBytes + 1_000;
+}
+
+/**
+ * Worst case for one call, held against the budgets until the real cost is
+ * known: the input upper bound, and output assumed to use all of max_tokens.
+ */
+export function reserveMicro(model: string, inputBytes: number, maxTokens: number): number {
   const rate = rateFor(model);
   if (!rate) throw new Error(`No price for model ${model}`);
-  const inputTokens = Math.ceil(inputChars / 2.5) + 1_000;
-  return Math.ceil(inputTokens * rate.input + maxTokens * rate.output);
+  return Math.ceil(inputTokensUpperBound(inputBytes) * rate.input + maxTokens * rate.output);
+}
+
+/** The input side alone, charged when a call fails without a usage report and may still have been read. */
+export function inputOnlyMicro(model: string, inputBytes: number): number {
+  const rate = rateFor(model);
+  if (!rate) throw new Error(`No price for model ${model}`);
+  return Math.ceil(inputTokensUpperBound(inputBytes) * rate.input);
 }

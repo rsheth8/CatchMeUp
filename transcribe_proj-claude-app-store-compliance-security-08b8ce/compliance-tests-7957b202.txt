@@ -1,0 +1,39 @@
+$ bash -c 'set -o pipefail; xcodebuild -project CatchMeUp.xcodeproj -scheme CatchMeUp -destination '"'"'platform=iOS Simulator,name=iPhone 17 Pro'"'"' -derivedDataPath DERIVED_DATA -only-testing:CatchMeUpTests/AppleSignInTests -only-testing:CatchMeUpTests/ProviderPrivacyTests -only-testing:CatchMeUpUITests/LegalLinksUITests -only-testing:CatchMeUpUITests/ShowcaseUITests/testShowcaseTourAndAccountExit -parallel-testing-enabled NO test 2>&1 | grep -E "Test Case .*(passed|failed)|Executed [0-9]+ test|\*\* TEST"'
+Test Case '-[CatchMeUpTests.AppleSignInTests testActiveCredentialStaysSignedIn]' passed (0.016 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testAnswerAboutAPreviousUserIsIgnored]' passed (0.028 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testAppleCheckAnswersForAnUnknownUser]' passed (0.020 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testAppleUserIDIsSavedAndSurvivesRelaunch]' passed (0.016 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testFailedCheckDoesNotSignAnyoneOut]' passed (0.014 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testLaterSignInKeepsTheNameAppleSentFirst]' passed (0.016 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testLegalLinksPointAtThePublicPages]' passed (0.004 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testRevocationNoticeRemovesIdentity]' passed (0.016 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testRevokedOrMissingCredentialRemovesIdentity]' passed (0.019 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testSignInWithoutSavedIDSkipsTheCheck]' passed (0.012 seconds).
+Test Case '-[CatchMeUpTests.AppleSignInTests testSignOutRemovesAppleUserID]' passed (0.016 seconds).
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.176 (0.181) seconds
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testAllowedRequestCarriesOnlyThatProvidersKeyToThatProvider]' passed (0.031 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testConsentDoesNotCarryToAnotherDestination]' passed (0.014 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testCustomProviderDoesNotInheritAPresetAddress]' passed (0.007 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testCustomProviderKeyIsTiedToItsServer]' passed (0.012 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testFixedProviderIgnoresAStaleCustomAddress]' passed (0.011 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testFreshInstallErasesItemsLeftByADeletedCopy]' passed (0.008 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testGoogleSignInNeedsARealClientIDAndItsScheme]' passed (0.002 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testKeyStaysWithTheProviderItWasEnteredFor]' passed (0.017 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testLegacySharedKeyMovesToTheSelectedProviderOnly]' passed (0.016 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testLockedDeviceNeverLooksLikeAFreshInstall]' passed (0.011 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testNothingIsSentWithoutConsent]' passed (0.010 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testOllamaNeverReceivesAKey]' passed (0.008 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testProviderIsNotReadyUntilSharingIsAllowed]' passed (0.012 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testThisBuildHidesUnconfiguredGoogleSignIn]' passed (0.001 seconds).
+Test Case '-[CatchMeUpTests.ProviderPrivacyTests testUpdateAndLaterLaunchesKeepKeychainItems]' passed (0.007 seconds).
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.167 (0.172) seconds
+	 Executed 26 tests, with 0 failures (0 unexpected) in 0.344 (0.354) seconds
+	 Executed 26 tests, with 0 failures (0 unexpected) in 0.344 (0.354) seconds
+Test Case '-[CatchMeUpUITests.LegalLinksUITests testSettingsOpensThePrivacyPolicyInSafari]' passed (61.506 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 61.506 (61.507) seconds
+Test Case '-[CatchMeUpUITests.ShowcaseUITests testShowcaseTourAndAccountExit]' passed (27.113 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 27.113 (27.115) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 88.619 (88.624) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 88.619 (88.625) seconds
+** TEST SUCCEEDED **
+[exit 0 · 121.5s · in ios]

@@ -49,7 +49,11 @@ Mechanical checks (no judge, no vendor bias):
 - **Unsupported numbers.** Figures in the notes that never appear in the transcript. This is a proxy: a correctly computed figure (an average, a percentage) also counts, for every engine alike.
 - **Time and API cost** per recording.
 
-Judged checks (`bench judge`, a stronger Claude, `claude-opus-5-5` by default):
+Judged checks (`bench judge`, a stronger Claude, `claude-opus-5-5` by default). By default the judge
+runs through the `claude` CLI, so it uses your Claude subscription and costs no API spend (it counts
+against the subscription's usage limits; `--concurrency 2` is kinder to them). `--judge-via api`
+uses `ANTHROPIC_API_KEY` instead. The CLI runs with no tools, settings, hooks or saved session, and API-key
+variables are removed from its environment so the key can never be used by accident:
 
 - Faithfulness, completeness and usefulness from 1 to 5, scored blind against the transcript.
 - Pairwise preference between every two engines, run in both orders. A win only counts if it holds in both; a split is a tie.

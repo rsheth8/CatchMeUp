@@ -135,19 +135,19 @@ enum Judge {
     // MARK: Calls
 
     static func score(
-        item: CorpusItem, run: RunRecord, recap: Recap, model: String, apiKey: String
+        item: CorpusItem, run: RunRecord, recap: Recap, client: JudgeClient
     ) async throws -> AbsoluteJudgment {
-        let reply = try await AnthropicHTTP.message(
-            model: model, system: absoluteSystem, user: absolutePrompt(item: item, recap: recap),
-            maxTokens: 2_000, effort: "medium", jsonSchema: absoluteSchema, apiKey: apiKey
+        let text = try await client.ask(
+            system: absoluteSystem, user: absolutePrompt(item: item, recap: recap),
+            schema: absoluteSchema, maxTokens: 2_000
         )
-        let json = try object(reply.text)
+        let json = try object(text)
         func rating(_ key: String) throws -> Int {
             guard let n = json[key] as? Int else { throw BenchError.badJudgeReply("missing \(key)") }
             return min(5, max(1, n))
         }
         return AbsoluteJudgment(
-            transcriptId: item.id, engine: run.engine, judgeModel: model,
+            transcriptId: item.id, engine: run.engine, judgeModel: client.model,
             faithfulness: try rating("faithfulness"),
             completeness: try rating("completeness"),
             usefulness: try rating("usefulness"),
@@ -159,13 +159,13 @@ enum Judge {
 
     static func compare(
         item: CorpusItem, first: (engine: String, recap: Recap), second: (engine: String, recap: Recap),
-        model: String, apiKey: String
+        client: JudgeClient
     ) async throws -> PairJudgment {
-        let reply = try await AnthropicHTTP.message(
-            model: model, system: pairSystem, user: pairPrompt(item: item, a: first.recap, b: second.recap),
-            maxTokens: 1_000, effort: "medium", jsonSchema: pairSchema, apiKey: apiKey
+        let text = try await client.ask(
+            system: pairSystem, user: pairPrompt(item: item, a: first.recap, b: second.recap),
+            schema: pairSchema, maxTokens: 1_000
         )
-        let json = try object(reply.text)
+        let json = try object(text)
         let winner: String
         switch json["winner"] as? String {
         case "A": winner = "first"
@@ -174,7 +174,7 @@ enum Judge {
         default: throw BenchError.badJudgeReply("winner was not A, B or tie")
         }
         return PairJudgment(
-            transcriptId: item.id, first: first.engine, second: second.engine, judgeModel: model,
+            transcriptId: item.id, first: first.engine, second: second.engine, judgeModel: client.model,
             winner: winner, reason: json["reason"] as? String ?? ""
         )
     }

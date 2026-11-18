@@ -20,6 +20,7 @@ public enum BenchCLI {
         var haikuModel = Contestants.defaultHaiku
         var strongModel = Contestants.defaultStrong
         var judgeModel = Contestants.defaultJudge
+        var judgeVia = "claude"
         var effort = "medium"
         var maxCost = 5.0
         var concurrency = 4
@@ -74,6 +75,10 @@ public enum BenchCLI {
             case "--haiku-model": o.haikuModel = try value(flag)
             case "--strong-model": o.strongModel = try value(flag)
             case "--judge-model": o.judgeModel = try value(flag)
+            case "--judge-via":
+                let via = try value(flag)
+                guard ["claude", "api"].contains(via) else { throw BenchError.usage("--judge-via is claude (your Claude subscription, through the claude CLI) or api (your API key).") }
+                o.judgeVia = via
             case "--effort": o.effort = try value(flag)
             case "--max-cost":
                 guard let cost = Double(try value(flag)), cost > 0 else { throw BenchError.usage("--max-cost needs a positive number of dollars.") }
@@ -117,7 +122,7 @@ public enum BenchCLI {
         print("macOS: \(os)")
         let apple = EngineFactory.appleAvailability()
         print("Apple on-device model: \(apple.detail)")
-        print("ANTHROPIC_API_KEY: \(apiKey.isEmpty ? "NOT SET (cloud engines and judging will not run)" : "set")")
+        print("ANTHROPIC_API_KEY: \(apiKey.isEmpty ? "NOT SET (cloud engines will not run; judging uses your Claude subscription unless --judge-via api)" : "set")")
         let corpus = try Corpus.load(from: URL(fileURLWithPath: o.corpus))
         print("Corpus: \(corpus.count) recordings in \(o.corpus)")
         for item in corpus {
@@ -200,7 +205,13 @@ public enum BenchCLI {
     // MARK: judge
 
     static func judge(_ o: Options) async throws -> Int32 {
-        guard !apiKey.isEmpty else { throw BenchError.missingKey }
+        let backend: JudgeBackend
+        if o.judgeVia == "api" {
+            guard !apiKey.isEmpty else { throw BenchError.missingKey }
+            backend = .api(key: apiKey)
+        } else {
+            backend = .claudeCLI
+        }
         BudgetGuard.shared.configure(limit: o.maxCost)
         let store = try resultDirectory(o, create: false)
         let runs = try store.loadRuns().filter { $0.ok && $0.recap != nil }
@@ -209,14 +220,14 @@ public enum BenchCLI {
         struct Job { let label: String; let work: @Sendable () async throws -> Void }
         var jobs: [Job] = []
         let judgeModel = o.judgeModel
-        let key = apiKey
+        let client = JudgeClient(model: judgeModel, backend: backend)
 
         for run in runs {
             guard let item = corpus[run.transcriptId], let recap = run.recap else { continue }
             let url = store.absoluteURL(transcript: run.transcriptId, engine: run.engine)
             if !o.force, FileManager.default.fileExists(atPath: url.path) { continue }
             jobs.append(Job(label: "score \(run.transcriptId) \(run.engine)") {
-                let j = try await Judge.score(item: item, run: run, recap: recap, model: judgeModel, apiKey: key)
+                let j = try await Judge.score(item: item, run: run, recap: recap, client: client)
                 try store.save(j, to: url)
             })
         }
@@ -234,7 +245,7 @@ public enum BenchCLI {
                         jobs.append(Job(label: "compare \(id) \(first.engine) then \(second.engine)") {
                             let p = try await Judge.compare(
                                 item: item, first: (first.engine, a), second: (second.engine, b),
-                                model: judgeModel, apiKey: key
+                                client: client
                             )
                             try store.save(p, to: url)
                         })
@@ -244,7 +255,7 @@ public enum BenchCLI {
         }
 
         if jobs.isEmpty { print("Nothing to judge (already done, or no successful runs)."); return 0 }
-        print("Judging with \(judgeModel): \(jobs.count) calls, up to \(o.concurrency) at a time.")
+        print("Judging with \(judgeModel) via \(backend.label): \(jobs.count) calls, up to \(o.concurrency) at a time.")
 
         var failed = 0
         var stopped = false
@@ -269,7 +280,8 @@ public enum BenchCLI {
                 launch()
             }
         }
-        print(String(format: "Judging finished: %d failed. API spend this run: $%.4f", failed, BudgetGuard.shared.total))
+        let spend = o.judgeVia == "api" ? String(format: "API spend this run: $%.4f", BudgetGuard.shared.total) : "No API spend (counted against your Claude subscription)."
+        print("Judging finished: \(failed) failed. \(spend)")
         return failed == 0 ? 0 : 4
     }
 
@@ -315,7 +327,7 @@ public enum BenchCLI {
 
       bench check                       availability, key, corpus summary
       bench run [options]               run engines over the corpus
-      bench judge [options]             blind Claude judge (needs ANTHROPIC_API_KEY)
+      bench judge [options]             blind Claude judge (default: your Claude subscription via the claude CLI)
       bench report [options]            tables and a verdict against criteria.json
       bench import --file F --id ID --mode lecture|meeting [--title T]
 
@@ -327,6 +339,7 @@ public enum BenchCLI {
       --haiku-model ID                  default: \(Contestants.defaultHaiku) (the app's default)
       --strong-model ID                 default: \(Contestants.defaultStrong)
       --judge-model ID                  default: \(Contestants.defaultJudge)
+      --judge-via claude|api            claude = subscription through the claude CLI (default), api = ANTHROPIC_API_KEY
       --effort low|medium|high          thinking effort for models that support it (default: medium)
       --max-cost USD                    stop before spending more than this in one invocation (default: 5)
       --concurrency N                   parallel judge calls (default: 4)

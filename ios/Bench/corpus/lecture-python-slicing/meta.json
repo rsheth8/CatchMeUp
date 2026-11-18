@@ -1,0 +1,93 @@
+{
+  "mode": "lecture",
+  "title": "Python strings: indexing and slicing",
+  "gold": {
+    "facts": [
+      {
+        "id": "strings-are-immutable",
+        "anyOf": [
+          "immutable",
+          "cannot be changed in place",
+          "can't be changed in place"
+        ]
+      },
+      {
+        "id": "stop-is-exclusive",
+        "anyOf": [
+          "stop is exclusive",
+          "exclusive",
+          "not included",
+          "stops before",
+          "excludes the stop",
+          "excluded"
+        ]
+      },
+      {
+        "id": "negative-indices",
+        "anyOf": [
+          "negative indices",
+          "negative index",
+          "count from the end",
+          "counting from the end",
+          "from the end"
+        ]
+      },
+      {
+        "id": "step-of-negative-1-reverses",
+        "anyOf": [
+          "reverse",
+          "reverses",
+          "backwards"
+        ]
+      },
+      {
+        "id": "slices-forgiving-indexing-not",
+        "anyOf": [
+          "IndexError"
+        ]
+      },
+      {
+        "id": "cola-in-chocolate-is-true",
+        "anyOf": [
+          "cola in chocolate"
+        ]
+      },
+      {
+        "id": "chocolate-reversed",
+        "anyOf": [
+          "etalocohc"
+        ]
+      },
+      {
+        "id": "homework-2-due-thursday",
+        "anyOf": [
+          "homework 2",
+          "due thursday",
+          "due this thursday"
+        ]
+      },
+      {
+        "id": "quiz-next-tuesday",
+        "anyOf": [
+          "next tuesday",
+          "15 minute",
+          "15-minute",
+          "15 min"
+        ]
+      },
+      {
+        "id": "office-hours-room-212",
+        "anyOf": [
+          "212"
+        ]
+      }
+    ],
+    "speakerNames": [],
+    "forbiddenNames": [
+      "Professor Smith",
+      "Dr. Smith",
+      "Professor Johnson",
+      "Professor Lee"
+    ]
+  }
+}

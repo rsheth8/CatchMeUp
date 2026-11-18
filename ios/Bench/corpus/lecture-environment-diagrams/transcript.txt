@@ -1,0 +1,50 @@
+[00:00:00] Good afternoon. Before we start, a quick reminder that Midterm 1 is on October 9, and it covers everything up through higher-order functions.
+[00:00:12] Today's topic, environment diagrams, is the single most tested idea on that exam, so please pay close attention.
+[00:00:22] Let's begin with why we draw these at all. When Python runs your program, it keeps track of names and their values somewhere. An environment diagram is just a picture of that bookkeeping.
+[00:00:36] If you can draw the diagram, you can predict what any program prints, even a tricky one.
+[00:00:43] There are two kinds of things in a diagram. Frames, which are boxes that hold name to value bindings, and function values, which are drawn off to the side.
+[00:00:56] Every diagram starts with one frame called the global frame.
+[00:01:03] Rule number 1. When you run an assignment statement, you evaluate the right side first, then you bind the name on the left to that value in the current frame.
+[00:01:16] So x equals 5 writes x colon 5 into the global frame.
+[00:01:23] Rule number 2. When you run a def statement, you create a function value and bind its name in the current frame.
+[00:01:32] The function value remembers two things, its name with its parameters, and its parent frame, which is the frame where it was defined. Write that down, the frame where it was defined.
+[00:01:46] We will come back to this.
+[00:01:49] Rule number 3. When you call a function, you open a new frame. You label it with a name like f1, f2, f3 in the order the frames get created.
+[00:02:02] You write the function's name next to it, and you also write the parent, which is copied from the function value, not from wherever you happened to call it.
+[00:02:15] Next you bind the parameters in the new frame to the argument values. Then you execute the body in that frame.
+[00:02:25] When the body hits a return statement, you write the return value in the frame, and that frame is finished.
+[00:02:35] Rule number 4 is name lookup. To look up a name, you check the current frame first.
+[00:02:43] If it's not there, you follow the parent link to the parent frame and check there, and you keep going until you hit the global frame. If the name still isn't found, you get a NameError.
+[00:02:57] Let's do a simple one together. Suppose we say def square of x, return x times x. Then y equals square of 3. We draw the global frame with square pointing at a function value, parent global.
+[00:03:13] Then calling square of 3 opens frame f1, parent is global, x is bound to 3, and the return value is 9. Back in the global frame, y gets 9.
+[00:03:25] That was easy because everything happened in the global frame. Now it gets interesting, because functions can be defined inside other functions, and they can be returned.
+[00:03:40] Here is the example I want you to remember. def make adder of n. Inside it, def adder of k, return k plus n. And then make adder returns adder. Now we say add three equals make adder of 3.
+[00:03:55] Then we say add three of 4.
+[00:04:00] Let's draw it. The global frame gets make adder, a function value with parent global. Next we call make adder of 3. That opens frame f1, with parent global, and n is bound to 3.
+[00:04:15] Inside f1 the def statement runs, so we create the function value adder and bind the name adder in f1. This function value's parent is f1, because that is the frame where it was defined.
+[00:04:30] Then make adder returns that function value, and the name add three in the global frame is bound to it.
+[00:04:40] Now we call add three of 4. Which function is that? It's adder. So we open frame f2. What's the parent of f2? Not the global frame, even though we called it from the global frame.
+[00:04:56] The parent is f1, copied from the function value. That's the rule I told you to remember.
+[00:05:04] In f2, k is bound to 4. The body says return k plus n. We find k in f2, it's 4. We look for n, it's not in f2, so we follow the parent link to f1 and find n equals 3.
+[00:05:17] The return value is 4 plus 3, which is 7.
+[00:05:23] This is called a closure. The inner function adder carries its parent frame with it, so it remembers n equals 3 even after make adder has finished running.
+[00:05:34] That's what the diagram shows and that's why it matters.
+[00:05:41] The most common mistake on exams is drawing the parent of a new frame as the frame where the function was called. Don't do that.
+[00:05:52] The parent is always the frame where the function was defined. If you take one thing from today, take that.
+[00:06:02] Another common mistake is forgetting to number the frames in the order they're created. If you open f1 and then f2, don't relabel them later. Examiners check this.
+[00:06:16] Let's look at another type of question, lambda. A lambda expression creates a function value without binding a name.
+[00:06:27] So lambda x colon x plus 1 creates a function whose parent is the current frame. If we write add one equals lambda x colon x plus 1, the name add one is bound to that function value.
+[00:06:41] In the diagram, we write the function as lambda x with its parent.
+[00:06:47] Now higher-order functions. A higher-order function is one that takes a function as an argument or returns a function as its result. Our make adder is the second kind.
+[00:07:02] Here's one of the first kind, compose.
+[00:07:06] def compose of f and g. Inside, def h of x, return f of g of x. Then compose returns h. Let's use it. Say compose of square and add one, and we call the result on 4.
+[00:07:20] So the first step is g is add one, f is square. We call h of 4. That evaluates add one of 4, which is 5, and then square of 5, which is 25. So the answer is 25.
+[00:07:34] Notice the order. The function g is applied first and f second, even though f is written first. People get this backwards all the time, so read compose carefully.
+[00:07:48] In the diagram, calling compose opens frame f1 with f and g bound to the two function values. The def inside creates h with parent f1.
+[00:08:00] The call to h opens a new frame f2 with parent f1, and when h calls f and g, those are looked up by following the parent link up to f1.
+[00:08:11] Let me give you three tips for the exam. One, draw the global frame first and fill in every def before you evaluate any calls.
+[00:08:22] Two, write the parent of every frame, every single time, even when it's global. Three, when in doubt, find the function value and read its parent, never the call site.
+[00:08:35] Okay, a few logistics. Lab 3 is due Friday at 11:59 p.m. and it has two environment diagram questions on it. Our TA Marisol is running an extra review session on Wednesday at 6 p.m.
+[00:08:50] in room 306. It will go through the discussion worksheet on higher-order functions, so bring it with you.
+[00:09:01] There's also a reading assignment. Please read the textbook section on higher-order functions before Monday.
+[00:09:09] We'll start recursion next week, and recursion builds directly on what you learned today. Thanks everyone, see you Monday.

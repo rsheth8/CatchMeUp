@@ -1,0 +1,118 @@
+{
+  "mode": "meeting",
+  "title": "Mobile app launch planning",
+  "gold": {
+    "facts": [
+      {
+        "id": "launch-moved-to-june-17",
+        "anyOf": [
+          "june 17"
+        ]
+      },
+      {
+        "id": "original-date-june-3",
+        "anyOf": [
+          "june 3"
+        ]
+      },
+      {
+        "id": "payment-certification-delay",
+        "anyOf": [
+          "certif"
+        ]
+      },
+      {
+        "id": "beta-cohort-200-users",
+        "anyOf": [
+          "200 users",
+          "200 beta",
+          "200 people",
+          "cohort of 200"
+        ]
+      },
+      {
+        "id": "monthly-price-12",
+        "anyOf": [
+          "12 dollars",
+          "12 per month",
+          "12/month",
+          "12 a month",
+          "$12"
+        ]
+      },
+      {
+        "id": "annual-price-99",
+        "anyOf": [
+          "99"
+        ]
+      },
+      {
+        "id": "seven-day-free-trial",
+        "anyOf": [
+          "7 day",
+          "7-day",
+          "seven day",
+          "seven-day",
+          "free trial"
+        ]
+      },
+      {
+        "id": "team-sharing-cut-from-v1",
+        "anyOf": [
+          "team sharing"
+        ]
+      },
+      {
+        "id": "dark-mode-tabled",
+        "anyOf": [
+          "dark mode"
+        ]
+      },
+      {
+        "id": "payments-by-may-24",
+        "anyOf": [
+          "may 24"
+        ]
+      },
+      {
+        "id": "onboarding-screens-by-may-20",
+        "anyOf": [
+          "may 20"
+        ]
+      },
+      {
+        "id": "support-docs-by-june-5",
+        "anyOf": [
+          "june 5"
+        ]
+      },
+      {
+        "id": "privacy-policy-legal-by-may-22",
+        "anyOf": [
+          "may 22"
+        ]
+      },
+      {
+        "id": "app-store-review-risk",
+        "anyOf": [
+          "app store"
+        ]
+      }
+    ],
+    "speakerNames": [
+      "Hannah",
+      "Giorgio",
+      "Wen",
+      "Bola"
+    ],
+    "forbiddenNames": [
+      "Sarah",
+      "Michael",
+      "David",
+      "Priya",
+      "Marcus",
+      "Jennifer",
+      "Alex"
+    ]
+  }
+}

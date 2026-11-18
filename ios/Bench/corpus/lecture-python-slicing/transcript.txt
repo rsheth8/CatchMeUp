@@ -1,0 +1,25 @@
+[00:00:00] Okay everyone, let's get started.
+[00:00:05] Today we're going to talk about strings in Python, specifically how indexing and slicing work, because slicing shows up on almost every problem set from here on out.
+[00:00:19] First, the big idea. A string is an immutable sequence of characters. Immutable means you cannot change a string in place.
+[00:00:29] If you try to write s of 0 equals a capital X, Python raises a TypeError.
+[00:00:35] So whenever you see code that seems to modify a string, like upper or replace, what it actually does is build a brand new string and hand it back. The original is untouched.
+[00:00:50] Now indexing. Positions start at 0, not 1. For the string hello, h is index 0, e is index 1, and the last letter o is index 4.
+[00:01:01] Python also lets you count from the end with negative indices, so negative 1 is the last character and negative 2 is the second to last.
+[00:01:13] Now slicing. The syntax is s, open bracket, start, colon, stop, close bracket. The slice includes start but stops before stop.
+[00:01:23] So s 1 colon 4 on the word programming gives you r o g, three characters, not four.
+[00:01:32] A really common mistake is thinking the stop index is included. It's not, the stop is exclusive. A way to remember this is that the length of the slice is stop minus start. 4 minus 1 is 3.
+[00:01:47] You can leave either side blank. Leaving start blank means start at the beginning, and leaving stop blank means go all the way to the end.
+[00:01:58] So s colon 3 gives the first 3 characters, and s 3 colon gives everything from index 3 onward.
+[00:02:06] There's also a third number, the step. Start, colon, stop, colon, step. A step of 2 takes every other character.
+[00:02:17] And my favorite trick is a step of negative 1, which walks backwards, so s colon colon negative 1 reverses a string.
+[00:02:26] Let me do an example live. Say word equals the string chocolate. Word 1 colon 4 gives h o c. Word colon colon 2 gives c o o a e.
+[00:02:37] And word colon colon negative 1 gives e t a l o c o h c, which is chocolate backwards.
+[00:02:44] Questions so far? Yes, in the back. Good question, what happens if the stop index is bigger than the length? Python doesn't raise an error for slices, it just stops at the end of the string.
+[00:03:00] But a single index that's out of range, like word 9, does raise an IndexError. Slices are forgiving, indexing is not.
+[00:03:11] Next, a few useful tools. The len function returns the number of characters, so len of chocolate is 9. The in operator checks for substrings.
+[00:03:23] Here's one that surprises people, the string cola in chocolate is True, because c o l a really does appear inside chocolate.
+[00:03:34] The find method returns the index of the first match, or negative 1 if there's no match. And split breaks a string into a list, by default on whitespace.
+[00:03:47] Now logistics. Homework 2 on strings is due this Thursday at 11:59 p.m., and there's a quiz on indexing and slicing next Tuesday, in lecture, 15 minutes.
+[00:04:00] Slicing questions are always on the quiz, so practice reversing and stepping.
+[00:04:07] One last thing, office hours moved. Tuesday office hours are now at 4 p.m. in room 212 instead of 3 p.m. Okay, that's it for today.
+[00:04:19] Practice with the Python Tutor tool before Thursday and I'll see you Tuesday.

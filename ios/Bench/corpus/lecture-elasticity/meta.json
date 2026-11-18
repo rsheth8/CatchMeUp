@@ -1,0 +1,111 @@
+{
+  "mode": "lecture",
+  "title": "Price elasticity of demand",
+  "gold": {
+    "facts": [
+      {
+        "id": "definition-percent-change-ratio",
+        "anyOf": [
+          "percentage change in quantity",
+          "% change in quantity",
+          "percent change in quantity"
+        ]
+      },
+      {
+        "id": "elastic-inelastic-unit",
+        "anyOf": [
+          "unit elastic",
+          "unit elasticity"
+        ]
+      },
+      {
+        "id": "midpoint-formula",
+        "anyOf": [
+          "midpoint"
+        ]
+      },
+      {
+        "id": "coffee-elasticity-about-1.09",
+        "anyOf": [
+          "1.09"
+        ]
+      },
+      {
+        "id": "coffee-price-3-to-3.60",
+        "anyOf": [
+          "3.60"
+        ]
+      },
+      {
+        "id": "determinant-substitutes",
+        "anyOf": [
+          "substitutes"
+        ]
+      },
+      {
+        "id": "gasoline-short-run-0.2",
+        "anyOf": [
+          "gasoline"
+        ]
+      },
+      {
+        "id": "total-revenue-rule",
+        "anyOf": [
+          "total revenue"
+        ]
+      },
+      {
+        "id": "coffee-revenue-1476",
+        "anyOf": [
+          "1,476",
+          "1476"
+        ]
+      },
+      {
+        "id": "cross-price-elasticity",
+        "anyOf": [
+          "cross-price",
+          "cross price"
+        ]
+      },
+      {
+        "id": "income-elasticity",
+        "anyOf": [
+          "income elasticity"
+        ]
+      },
+      {
+        "id": "slope-vs-elasticity-mistake",
+        "anyOf": [
+          "slope"
+        ]
+      },
+      {
+        "id": "problem-set-4-monday",
+        "anyOf": [
+          "problem set 4"
+        ]
+      },
+      {
+        "id": "quiz-chapter-5",
+        "anyOf": [
+          "chapter 5"
+        ]
+      },
+      {
+        "id": "ta-review-jonas",
+        "anyOf": [
+          "jonas",
+          "economics library"
+        ]
+      }
+    ],
+    "speakerNames": [],
+    "forbiddenNames": [
+      "Professor Smith",
+      "Dr. Smith",
+      "Professor Johnson",
+      "Professor Lee"
+    ]
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "mode": "meeting",
+  "title": "Engineering standup",
+  "gold": {
+    "facts": [
+      {
+        "id": "login-timeout-cause-15-minutes",
+        "anyOf": [
+          "15 minutes",
+          "overwritten",
+          "config default"
+        ]
+      },
+      {
+        "id": "tomas-ships-fix-thursday",
+        "anyOf": [
+          "thursday"
+        ]
+      },
+      {
+        "id": "rin-reviews-pull-request",
+        "anyOf": [
+          "pull request",
+          "review tomas",
+          "reviews tomas",
+          "review the pr"
+        ]
+      },
+      {
+        "id": "csv-export-70-percent",
+        "anyOf": [
+          "70 percent",
+          "70%"
+        ]
+      },
+      {
+        "id": "staging-database-down",
+        "anyOf": [
+          "staging database",
+          "staging db",
+          "staging is down",
+          "staging was down"
+        ]
+      },
+      {
+        "id": "ticket-infra-482",
+        "anyOf": [
+          "INFRA-482"
+        ]
+      },
+      {
+        "id": "fallback-production-snapshot",
+        "anyOf": [
+          "snapshot"
+        ]
+      },
+      {
+        "id": "demo-moved-to-next-tuesday",
+        "anyOf": [
+          "next tuesday"
+        ]
+      },
+      {
+        "id": "demo-at-2pm",
+        "anyOf": [
+          "2 p.m",
+          "2pm",
+          "2:00 p",
+          "2:00 pm"
+        ]
+      },
+      {
+        "id": "lisbon-customer",
+        "anyOf": [
+          "lisbon"
+        ]
+      },
+      {
+        "id": "pricing-page-copy-to-design",
+        "anyOf": [
+          "pricing page"
+        ]
+      }
+    ],
+    "speakerNames": [
+      "Tomas",
+      "Rin",
+      "Alicia"
+    ],
+    "forbiddenNames": [
+      "Sarah",
+      "Michael",
+      "David",
+      "Jennifer",
+      "John",
+      "Priya",
+      "Marcus"
+    ]
+  }
+}

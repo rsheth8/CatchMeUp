@@ -1,0 +1,11 @@
+{
+  "candidate": "apple",
+  "baseline": "haiku",
+  "maxFailureRate": 0.05,
+  "maxInventedNames": 0,
+  "minBookmarkGroundedRate": 0.95,
+  "minFactCoverageVsBaseline": 0.85,
+  "maxJudgeDeficit": 0.5,
+  "minPairwiseScore": 0.4,
+  "maxUnsupportedNumberExcess": 0.05
+}

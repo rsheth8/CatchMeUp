@@ -1,0 +1,39 @@
+[00:00:00] Welcome back. Today we're covering price elasticity of demand, which is one of the most useful ideas in this whole course, and one that businesses actually use to set prices.
+[00:00:14] By the end you should be able to compute it, classify it, and say what it implies for a firm's revenue.
+[00:00:23] Let's start with the intuition. When the price of something goes up, people buy less of it. But how much less? That's the question elasticity answers.
+[00:00:36] Price elasticity of demand is the percentage change in quantity demanded divided by the percentage change in price.
+[00:00:46] Because demand curves slope downward, the number comes out negative. By convention we drop the minus sign and talk about the absolute value.
+[00:00:58] So an elasticity of 2 means that a 1 percent rise in price cuts the quantity demanded by about 2 percent.
+[00:01:06] We classify demand in three groups. If the elasticity is greater than 1, demand is elastic, meaning buyers are very responsive to price.
+[00:01:18] If it's less than 1, demand is inelastic, meaning buyers barely react. And if it equals exactly 1, we call it unit elastic.
+[00:01:28] There's a computational subtlety. If you compute a percentage change from a starting value, you get a different answer going up than going down. To avoid that, we use the midpoint formula.
+[00:01:43] The percentage change is the change divided by the average of the old and new values, not by the old value.
+[00:01:52] Let me work an example with real numbers. A coffee shop raises the price of a large coffee from $3.00 to $3.60. Weekly sales fall from 500 cups to 410 cups.
+[00:02:04] First the percentage change in price using the midpoint. The change is 60 cents. The average of 3.00 and 3.60 is 3.30. So 0.60 divided by 3.30 is about 18.2 percent.
+[00:02:18] Now the quantity. The change is negative 90 cups. The average of 500 and 410 is 455. So 90 divided by 455 is about 19.8 percent.
+[00:02:30] Elasticity is 19.8 divided by 18.2, which is about 1.09. That's slightly above 1, so demand for the coffee is elastic, but only just.
+[00:02:42] Make sure you can reproduce that calculation, because I'll give you one like it on the quiz.
+[00:02:51] Now why are some goods elastic and others inelastic? There are four main determinants, and I want you to memorize them. First, availability of close substitutes.
+[00:03:03] If there are many substitutes, demand is more elastic. Coffee shops on the same street compete with each other, so raising your price sends customers next door.
+[00:03:16] Second, necessities versus luxuries. Necessities like insulin or basic food tend to be inelastic, while luxuries like vacations or fancy restaurants tend to be elastic.
+[00:03:30] Third, how broadly you define the market. Demand for food in general is very inelastic, because you have to eat, but demand for one particular brand of cereal is very elastic.
+[00:03:43] Fourth, the time horizon. Demand tends to be more elastic over longer periods. A famous example is gasoline.
+[00:03:52] In the short run, if the price jumps, people still need to drive to work, so studies find the elasticity is only around 0.2.
+[00:04:03] Over several years, people buy more efficient cars and move closer to work, and the long-run elasticity is much larger.
+[00:04:12] And one more factor you'll sometimes see, the share of the budget.
+[00:04:18] Goods that take up a big share of income, like rent or cars, tend to have more elastic demand than small purchases like salt.
+[00:04:28] Now the part businesses care about, which is total revenue. Total revenue equals price times quantity. What happens to it when the price rises depends entirely on elasticity.
+[00:04:42] If demand is elastic, a price increase makes quantity fall by a larger percentage than price rose, so total revenue falls.
+[00:04:53] If demand is inelastic, quantity falls by a smaller percentage, so total revenue rises. And with unit elasticity, revenue doesn't change.
+[00:05:05] So think about it from the seller's side. If you sell something with inelastic demand, like a prescription drug with no substitute, raising prices increases your revenue.
+[00:05:18] If you sell something elastic, cutting your price can actually raise your revenue, because you sell so many more units.
+[00:05:30] Let me check that against the coffee shop. Before the change, revenue was $3.00 times 500, which is $1,500 a week. After, it's $3.60 times 410, which is $1,476.
+[00:05:44] Revenue fell by $24, exactly what we predicted with elasticity slightly above 1. Good, the story holds together.
+[00:05:53] Two other elasticities I want to mention briefly. Income elasticity of demand measures how quantity responds to changes in income.
+[00:06:04] For normal goods it is positive, and for inferior goods, like instant noodles, it is negative. Cross-price elasticity measures how the quantity of one good responds to the price of another.
+[00:06:19] For substitutes it is positive, for complements like printers and ink it is negative.
+[00:06:27] Common mistakes. One, mixing up elasticity with slope. A straight line demand curve has a constant slope but its elasticity changes along the curve, high at the top and low at the bottom.
+[00:06:43] Two, forgetting to use the midpoint formula. Three, forgetting the revenue rule direction, so I'll say it one more time. Elastic means price and revenue move in opposite directions.
+[00:06:58] Inelastic means they move in the same direction.
+[00:07:04] Okay, logistics. Problem set 4 is due Monday at 9 a.m. and it has a revenue question just like what we did today. The quiz covering chapter 5 is this Friday and it will be 20 minutes.
+[00:07:18] Jonas, our TA, will hold a review session Thursday at 5 p.m. in the economics library. Please come with questions. See you Friday.

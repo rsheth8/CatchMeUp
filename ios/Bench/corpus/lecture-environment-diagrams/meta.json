@@ -1,0 +1,100 @@
+{
+  "mode": "lecture",
+  "title": "Environment diagrams and higher-order functions",
+  "gold": {
+    "facts": [
+      {
+        "id": "parent-is-where-defined",
+        "anyOf": [
+          "where it was defined",
+          "where the function was defined",
+          "frame in which it was defined",
+          "not where it was called",
+          "not the frame where it was called",
+          "defined, not called"
+        ]
+      },
+      {
+        "id": "global-frame",
+        "anyOf": [
+          "global frame"
+        ]
+      },
+      {
+        "id": "frames-numbered-f1-f2",
+        "anyOf": [
+          "f1"
+        ]
+      },
+      {
+        "id": "name-lookup-follows-parent",
+        "anyOf": [
+          "parent link",
+          "follow the parent",
+          "parent frame"
+        ]
+      },
+      {
+        "id": "closure",
+        "anyOf": [
+          "closure"
+        ]
+      },
+      {
+        "id": "add-three-of-4-is-7",
+        "anyOf": [
+          "4 plus 3",
+          "returns 7",
+          "result is 7",
+          "equals 7",
+          "is 7"
+        ]
+      },
+      {
+        "id": "compose-applies-g-first",
+        "anyOf": [
+          "g is applied first",
+          "g first",
+          "applied first",
+          "add one first",
+          "inner function first"
+        ]
+      },
+      {
+        "id": "lambda-no-name",
+        "anyOf": [
+          "lambda"
+        ]
+      },
+      {
+        "id": "midterm-1-october-9",
+        "anyOf": [
+          "october 9",
+          "oct 9",
+          "oct. 9"
+        ]
+      },
+      {
+        "id": "lab-3-due-friday",
+        "anyOf": [
+          "lab 3"
+        ]
+      },
+      {
+        "id": "review-session-marisol",
+        "anyOf": [
+          "marisol",
+          "wednesday at 6",
+          "room 306"
+        ]
+      }
+    ],
+    "speakerNames": [],
+    "forbiddenNames": [
+      "Professor Smith",
+      "Dr. Smith",
+      "Professor Johnson",
+      "Professor Lee"
+    ]
+  }
+}

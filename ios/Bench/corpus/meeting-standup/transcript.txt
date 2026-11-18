@@ -1,0 +1,18 @@
+[00:00:00] Speaker 1: Morning everyone. Quick standup, let's keep it under ten minutes. Tomas, you want to go first?
+[00:00:08] Speaker 2: Sure. Yesterday I tracked down the login timeout bug.
+[00:00:15] Speaker 2: It turns out the session token expires after 15 minutes instead of 60 because of a config default that got overwritten during the last deploy. I have a fix ready, I just need a review.
+[00:00:31] Speaker 1: Great. Rin, can you take that review today?
+[00:00:36] Speaker 3: Yes, I'll review Tomas's pull request this morning, before lunch. I'm also still working on the export to CSV feature. That's about 70 percent done.
+[00:00:49] Speaker 1: Any blockers on the export?
+[00:00:52] Speaker 3: Not on the export itself, but the staging database has been down since Monday, so I can't test against realistic data.
+[00:01:03] Speaker 3: I filed ticket INFRA-482 with the infrastructure team and I haven't heard back.
+[00:01:11] Speaker 2: Same problem on my side. I can't reproduce the timeout on staging for the same reason. I verified it locally but I'd like to confirm it on staging before we ship.
+[00:01:24] Speaker 1: Okay, that's the real blocker. I'll ping the infrastructure lead this morning and push on INFRA-482.
+[00:01:33] Speaker 1: If it isn't back by tomorrow noon we'll test against a copy of the production snapshot instead.
+[00:01:43] Speaker 3: That works for me.
+[00:01:46] Speaker 1: Alicia, I'll go to you next. Oh wait, I'm Alicia, sorry. Tomas, one more thing for you, the customer in Lisbon asked again about the timeout, so can you ship the fix by Thursday?
+[00:02:02] Speaker 2: Thursday is doable if staging is back or if we use the snapshot. I'll commit to Thursday.
+[00:02:11] Speaker 1: Good. For my part, I'm sending the updated pricing page copy to design by Friday.
+[00:02:18] Speaker 1: Rin, the demo is currently on Friday, but with staging down I don't think we'll have the export ready to show. Are you okay moving the demo?
+[00:02:30] Speaker 3: Yes, I'd rather demo something that works. Next Tuesday would be better for me.
+[00:02:38] Speaker 1: Agreed. We'll move the demo from Friday to next Tuesday at 2 p.m. I'll update the invite. Anything else? No? Okay, thanks everyone.

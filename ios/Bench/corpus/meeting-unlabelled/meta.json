@@ -1,0 +1,103 @@
+{
+  "mode": "meeting",
+  "title": "Vendor contract renewal (no names spoken)",
+  "gold": {
+    "facts": [
+      {
+        "id": "quote-24000",
+        "anyOf": [
+          "24,000",
+          "24000"
+        ]
+      },
+      {
+        "id": "last-year-20000",
+        "anyOf": [
+          "20,000",
+          "20000"
+        ]
+      },
+      {
+        "id": "seat-usage-40-percent",
+        "anyOf": [
+          "40 percent",
+          "40%"
+        ]
+      },
+      {
+        "id": "target-25-seats",
+        "anyOf": [
+          "25 seats",
+          "25-seat",
+          "25 seat"
+        ]
+      },
+      {
+        "id": "target-price-18000",
+        "anyOf": [
+          "18,000",
+          "18000"
+        ]
+      },
+      {
+        "id": "walk-away-21000",
+        "anyOf": [
+          "21,000",
+          "21000"
+        ]
+      },
+      {
+        "id": "auto-renewal-30-day-notice",
+        "anyOf": [
+          "30 days",
+          "30-day",
+          "auto-renewal",
+          "auto renewal"
+        ]
+      },
+      {
+        "id": "migration-two-months",
+        "anyOf": [
+          "two months",
+          "2 months"
+        ]
+      },
+      {
+        "id": "fallback-one-year-renewal",
+        "anyOf": [
+          "one year renewal",
+          "one-year renewal",
+          "1 year renewal",
+          "1-year renewal"
+        ]
+      },
+      {
+        "id": "usage-numbers-to-finance",
+        "anyOf": [
+          "finance"
+        ]
+      },
+      {
+        "id": "email-the-vendor",
+        "anyOf": [
+          "email the vendor",
+          "emails the vendor",
+          "email to the vendor",
+          "contact the vendor",
+          "reach out to the vendor"
+        ]
+      }
+    ],
+    "speakerNames": [],
+    "forbiddenNames": [
+      "Sarah",
+      "John",
+      "Michael",
+      "David",
+      "Emily",
+      "Jessica",
+      "Alex",
+      "Priya"
+    ]
+  }
+}

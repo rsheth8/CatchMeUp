@@ -1,0 +1,40 @@
+[00:00:00] Speaker 1: Thanks for making time, everyone. This is the launch planning meeting for the mobile app. I want to leave with a confirmed launch date, a pricing decision, and clear owners.
+[00:00:14] Speaker 1: Giorgio, where do we stand on engineering?
+[00:00:20] Speaker 2: Honestly, we're behind on payments. The payment provider needs to certify our integration before we can charge real cards, and their certification queue is about two weeks.
+[00:00:34] Speaker 2: We submitted on Tuesday, so the earliest we could be certified is around May 20.
+[00:00:43] Speaker 1: Then the June 3 launch isn't realistic, is it?
+[00:00:48] Speaker 2: It's tight but not impossible. If certification comes back clean on May 20, I could finish the payments work by May 24.
+[00:01:00] Speaker 2: But that leaves almost no slack for app store review, which usually takes about 2 days but can take longer for a first submission.
+[00:01:11] Speaker 3: Can I add something from design? I think we should plan for slack.
+[00:01:18] Speaker 3: If the app store rejects us over onboarding wording, I'd need a day or two to fix screens, and Hannah's calendar is already full the week of June 3.
+[00:01:30] Speaker 1: Wen, that's a fair point. What do you need to finish the onboarding screens?
+[00:01:38] Speaker 3: The final onboarding screens are almost done. I can deliver them to engineering by May 20, as long as we settle the pricing screen copy by then.
+[00:01:50] Speaker 1: Understood. Bola, from the support side, what's your view on the launch date?
+[00:01:58] Speaker 4: Support is the thing I worry about. We expect the first 200 beta users to generate a lot of questions, and I don't have the help center articles or the reply macros written yet.
+[00:02:13] Speaker 4: I'd want at least two weeks after we freeze the product to prepare, so a later date is better for me.
+[00:02:23] Speaker 1: So, let me propose we move the launch date from June 3 to June 17.
+[00:02:30] Speaker 1: That gives engineering buffer for certification and app store review, gives design a safety margin, and gives support their two weeks. Any objections?
+[00:02:41] Speaker 2: No, June 17 works for me. I'd be much more comfortable with that.
+[00:02:48] Speaker 3: Fine by me.
+[00:02:50] Speaker 4: That's a big relief, thank you.
+[00:02:54] Speaker 1: Decision made. We launch on June 17, with the beta cohort of 200 users starting two weeks earlier, on June 3. Next, pricing. We've had two proposals.
+[00:03:05] Speaker 1: Monthly at 12 dollars, and an annual plan at 99 dollars. Does anyone have strong feelings?
+[00:03:13] Speaker 4: The annual plan at 99 works out to about 8.25 a month, which is a 31 percent discount. Customers will see that as a strong offer. I'd worry that anything deeper would eat into revenue.
+[00:03:27] Speaker 2: From a payments standpoint both plans are simple to support. The trial is the bigger question. Are we offering a free trial?
+[00:03:38] Speaker 1: Let's offer a 7 day free trial on both plans. I think that makes the conversion cleaner. Wen, you'll need to reflect that in the pricing screen.
+[00:03:51] Speaker 3: Okay, so the pricing screen will say 7 day free trial, 12 dollars a month, or 99 dollars a year. I'll have copy ready by the 20th.
+[00:04:03] Speaker 1: Great. So the pricing decision is 12 dollars monthly, 99 dollars annually, with a 7 day free trial. Now scope. Giorgio, you mentioned feature cuts.
+[00:04:15] Speaker 2: Yes. Team sharing is the riskiest feature. It touches permissions and sync, and I don't think we can test it properly before June 17.
+[00:04:26] Speaker 2: I'd propose cutting it from version 1 and shipping it in a point release later in the summer.
+[00:04:35] Speaker 4: That will disappoint a few of the beta customers who asked for it, but I'd rather ship something solid. I can write a note for the changelog.
+[00:04:48] Speaker 1: I agree. Team sharing is out of version 1. Dark mode is the other one I want to discuss. Wen, you've said you want it in the launch.
+[00:04:59] Speaker 3: I do. I think dark mode is something reviewers and early users notice immediately, and it's mostly done on the design side.
+[00:05:09] Speaker 2: I disagree. It's another 3 or 4 days of engineering work and a lot of screenshot regression testing. I'd rather spend those days on payments.
+[00:05:22] Speaker 1: Okay, we have a disagreement and I don't want to settle it in a rush. Let's table dark mode. Giorgio, give me a more precise estimate and we'll decide at next week's sync.
+[00:05:37] Speaker 2: I'll have an estimate by Friday.
+[00:05:42] Speaker 1: Thank you. One more thing, legal. We need the privacy policy reviewed before we submit to the app store. I'll confirm with legal that it's done by May 22. Let me recap the owners.
+[00:05:56] Speaker 1: Giorgio, finish the payments integration by May 24 and send me the dark mode estimate by Friday. Wen, final onboarding screens and the pricing copy by May 20.
+[00:06:09] Speaker 1: Bola, help center articles and reply macros by June 5. And I'll handle the legal review of the privacy policy by May 22.
+[00:06:20] Speaker 4: June 5 works for me, as long as the product freezes by then.
+[00:06:26] Speaker 1: It will. Product freeze is June 3. Last thing, the risk register. Biggest risks are the certification delay, an app store rejection, and support load from the beta.
+[00:06:40] Speaker 1: Let's review it again next week. Thanks everyone, that was productive.

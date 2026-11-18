@@ -1,0 +1,352 @@
+{
+  "mode": "lecture",
+  "title": "Four classes recorded in one day",
+  "gold": {
+    "facts": [
+      {
+        "id": "parent-is-where-defined",
+        "anyOf": [
+          "where it was defined",
+          "where the function was defined",
+          "frame in which it was defined",
+          "not where it was called",
+          "not the frame where it was called",
+          "defined, not called"
+        ]
+      },
+      {
+        "id": "global-frame",
+        "anyOf": [
+          "global frame"
+        ]
+      },
+      {
+        "id": "frames-numbered-f1-f2",
+        "anyOf": [
+          "f1"
+        ]
+      },
+      {
+        "id": "name-lookup-follows-parent",
+        "anyOf": [
+          "parent link",
+          "follow the parent",
+          "parent frame"
+        ]
+      },
+      {
+        "id": "closure",
+        "anyOf": [
+          "closure"
+        ]
+      },
+      {
+        "id": "add-three-of-4-is-7",
+        "anyOf": [
+          "4 plus 3",
+          "returns 7",
+          "result is 7",
+          "equals 7",
+          "is 7"
+        ]
+      },
+      {
+        "id": "compose-applies-g-first",
+        "anyOf": [
+          "g is applied first",
+          "g first",
+          "applied first",
+          "add one first",
+          "inner function first"
+        ]
+      },
+      {
+        "id": "lambda-no-name",
+        "anyOf": [
+          "lambda"
+        ]
+      },
+      {
+        "id": "midterm-1-october-9",
+        "anyOf": [
+          "october 9",
+          "oct 9",
+          "oct. 9"
+        ]
+      },
+      {
+        "id": "lab-3-due-friday",
+        "anyOf": [
+          "lab 3"
+        ]
+      },
+      {
+        "id": "review-session-marisol",
+        "anyOf": [
+          "marisol",
+          "wednesday at 6",
+          "room 306"
+        ]
+      },
+      {
+        "id": "definition-percent-change-ratio",
+        "anyOf": [
+          "percentage change in quantity",
+          "% change in quantity",
+          "percent change in quantity"
+        ]
+      },
+      {
+        "id": "elastic-inelastic-unit",
+        "anyOf": [
+          "unit elastic",
+          "unit elasticity"
+        ]
+      },
+      {
+        "id": "midpoint-formula",
+        "anyOf": [
+          "midpoint"
+        ]
+      },
+      {
+        "id": "coffee-elasticity-about-1.09",
+        "anyOf": [
+          "1.09"
+        ]
+      },
+      {
+        "id": "coffee-price-3-to-3.60",
+        "anyOf": [
+          "3.60"
+        ]
+      },
+      {
+        "id": "determinant-substitutes",
+        "anyOf": [
+          "substitutes"
+        ]
+      },
+      {
+        "id": "gasoline-short-run-0.2",
+        "anyOf": [
+          "gasoline"
+        ]
+      },
+      {
+        "id": "total-revenue-rule",
+        "anyOf": [
+          "total revenue"
+        ]
+      },
+      {
+        "id": "coffee-revenue-1476",
+        "anyOf": [
+          "1,476",
+          "1476"
+        ]
+      },
+      {
+        "id": "cross-price-elasticity",
+        "anyOf": [
+          "cross-price",
+          "cross price"
+        ]
+      },
+      {
+        "id": "income-elasticity",
+        "anyOf": [
+          "income elasticity"
+        ]
+      },
+      {
+        "id": "slope-vs-elasticity-mistake",
+        "anyOf": [
+          "slope"
+        ]
+      },
+      {
+        "id": "problem-set-4-monday",
+        "anyOf": [
+          "problem set 4"
+        ]
+      },
+      {
+        "id": "quiz-chapter-5",
+        "anyOf": [
+          "chapter 5"
+        ]
+      },
+      {
+        "id": "ta-review-jonas",
+        "anyOf": [
+          "jonas",
+          "economics library"
+        ]
+      },
+      {
+        "id": "light-dependent-reactions",
+        "anyOf": [
+          "light-dependent",
+          "light dependent"
+        ]
+      },
+      {
+        "id": "calvin-cycle",
+        "anyOf": [
+          "calvin cycle"
+        ]
+      },
+      {
+        "id": "thylakoid-membranes",
+        "anyOf": [
+          "thylakoid"
+        ]
+      },
+      {
+        "id": "stroma",
+        "anyOf": [
+          "stroma"
+        ]
+      },
+      {
+        "id": "chlorophyll-reflects-green",
+        "anyOf": [
+          "reflects green",
+          "reflect green",
+          "reflects the green",
+          "green light",
+          "color the plant is not using"
+        ]
+      },
+      {
+        "id": "overall-equation",
+        "anyOf": [
+          "C6H12O6"
+        ]
+      },
+      {
+        "id": "oxygen-comes-from-water",
+        "anyOf": [
+          "oxygen comes from water",
+          "oxygen from water",
+          "from splitting water",
+          "splitting water",
+          "splits water",
+          "oxygen 18",
+          "heavy isotope"
+        ]
+      },
+      {
+        "id": "atp-and-nadph",
+        "anyOf": [
+          "NADPH"
+        ]
+      },
+      {
+        "id": "rubisco-fixes-carbon",
+        "anyOf": [
+          "rubisco"
+        ]
+      },
+      {
+        "id": "midterm-2-march-14",
+        "anyOf": [
+          "march 14",
+          "midterm 2"
+        ]
+      },
+      {
+        "id": "lab-report-due-monday",
+        "anyOf": [
+          "lab report"
+        ]
+      },
+      {
+        "id": "strings-are-immutable",
+        "anyOf": [
+          "immutable",
+          "cannot be changed in place",
+          "can't be changed in place"
+        ]
+      },
+      {
+        "id": "stop-is-exclusive",
+        "anyOf": [
+          "stop is exclusive",
+          "exclusive",
+          "not included",
+          "stops before",
+          "excludes the stop",
+          "excluded"
+        ]
+      },
+      {
+        "id": "negative-indices",
+        "anyOf": [
+          "negative indices",
+          "negative index",
+          "count from the end",
+          "counting from the end",
+          "from the end"
+        ]
+      },
+      {
+        "id": "step-of-negative-1-reverses",
+        "anyOf": [
+          "reverse",
+          "reverses",
+          "backwards"
+        ]
+      },
+      {
+        "id": "slices-forgiving-indexing-not",
+        "anyOf": [
+          "IndexError"
+        ]
+      },
+      {
+        "id": "cola-in-chocolate-is-true",
+        "anyOf": [
+          "cola in chocolate"
+        ]
+      },
+      {
+        "id": "chocolate-reversed",
+        "anyOf": [
+          "etalocohc"
+        ]
+      },
+      {
+        "id": "homework-2-due-thursday",
+        "anyOf": [
+          "homework 2",
+          "due thursday",
+          "due this thursday"
+        ]
+      },
+      {
+        "id": "quiz-next-tuesday",
+        "anyOf": [
+          "next tuesday",
+          "15 minute",
+          "15-minute",
+          "15 min"
+        ]
+      },
+      {
+        "id": "office-hours-room-212",
+        "anyOf": [
+          "212"
+        ]
+      }
+    ],
+    "speakerNames": [],
+    "forbiddenNames": [
+      "Professor Smith",
+      "Dr. Smith",
+      "Professor Johnson",
+      "Professor Lee"
+    ]
+  }
+}

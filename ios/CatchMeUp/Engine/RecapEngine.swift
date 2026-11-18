@@ -98,6 +98,8 @@ extension RecapEngine {
     }
 }
 
+#if !CATCHMEUP_BENCH
+// The benchmark tool (ios/Bench) compiles these engines without the settings layer.
 enum RecapEngineFactory {
     @MainActor
     static func make(_ settings: AppSettings) -> RecapEngine {
@@ -113,6 +115,7 @@ enum RecapEngineFactory {
         }
     }
 }
+#endif
 
 // MARK: - Cloud
 
@@ -127,6 +130,7 @@ struct CloudRecapEngine: RecapEngine {
     }
 }
 
+#if !CATCHMEUP_BENCH
 // MARK: - Demo
 
 struct MockRecapEngine: RecapEngine {
@@ -158,6 +162,7 @@ struct MockRecapEngine: RecapEngine {
         return DemoResponses.meeting(transcript: transcript)
     }
 }
+#endif
 
 // MARK: - Apple on-device (iOS 26 Foundation Models)
 

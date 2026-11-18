@@ -1,0 +1,93 @@
+{
+  "mode": "lecture",
+  "title": "Photosynthesis: light reactions and the Calvin cycle",
+  "gold": {
+    "facts": [
+      {
+        "id": "light-dependent-reactions",
+        "anyOf": [
+          "light-dependent",
+          "light dependent"
+        ]
+      },
+      {
+        "id": "calvin-cycle",
+        "anyOf": [
+          "calvin cycle"
+        ]
+      },
+      {
+        "id": "thylakoid-membranes",
+        "anyOf": [
+          "thylakoid"
+        ]
+      },
+      {
+        "id": "stroma",
+        "anyOf": [
+          "stroma"
+        ]
+      },
+      {
+        "id": "chlorophyll-reflects-green",
+        "anyOf": [
+          "reflects green",
+          "reflect green",
+          "reflects the green",
+          "green light",
+          "color the plant is not using"
+        ]
+      },
+      {
+        "id": "overall-equation",
+        "anyOf": [
+          "C6H12O6"
+        ]
+      },
+      {
+        "id": "oxygen-comes-from-water",
+        "anyOf": [
+          "oxygen comes from water",
+          "oxygen from water",
+          "from splitting water",
+          "splitting water",
+          "splits water",
+          "oxygen 18",
+          "heavy isotope"
+        ]
+      },
+      {
+        "id": "atp-and-nadph",
+        "anyOf": [
+          "NADPH"
+        ]
+      },
+      {
+        "id": "rubisco-fixes-carbon",
+        "anyOf": [
+          "rubisco"
+        ]
+      },
+      {
+        "id": "midterm-2-march-14",
+        "anyOf": [
+          "march 14",
+          "midterm 2"
+        ]
+      },
+      {
+        "id": "lab-report-due-monday",
+        "anyOf": [
+          "lab report"
+        ]
+      }
+    ],
+    "speakerNames": [],
+    "forbiddenNames": [
+      "Professor Smith",
+      "Dr. Smith",
+      "Professor Johnson",
+      "Professor Lee"
+    ]
+  }
+}

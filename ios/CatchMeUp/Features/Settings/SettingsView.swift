@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     /// Non-nil while the feedback share sheet is up; holds the text being sent.
     @State private var feedback: String?
+    @State private var hostedUI = HostedAccountUI()
 
     var body: some View {
         @Bindable var settings = settings
@@ -55,7 +56,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    ForEach(EngineKind.allCases) { kind in
+                    ForEach(EngineKind.selectable) { kind in
                         EngineOption(kind: kind, isOn: settings.engineKind == kind) {
                             Haptics.tap()
                             if kind == .demo, !settings.isShowcase {
@@ -69,6 +70,10 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Who writes the notes")
+                }
+
+                if settings.engineKind == .hosted {
+                    HostedAccountSection(ui: hostedUI)
                 }
 
                 if settings.engineKind == .apiKey {
@@ -257,6 +262,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .hostedAccountPresentations(hostedUI)
             .sheet(isPresented: Binding(
                 get: { feedback != nil },
                 set: { if !$0 { feedback = nil } }
@@ -445,6 +451,7 @@ private struct EngineOption: View {
         case .demo: return "sparkles"
         case .onDevice: return "iphone.gen3"
         case .apiKey: return "key.fill"
+        case .hosted: return "cloud.fill"
         }
     }
 

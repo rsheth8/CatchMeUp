@@ -40,6 +40,14 @@ extension RecapEngine {
     func makeRecap(
         transcript: String, mode: Mode, progress: @escaping (Double) -> Void
     ) async throws -> Recap {
+        try await standardMakeRecap(transcript: transcript, mode: mode, progress: progress)
+    }
+
+    /// The shared implementation, callable by name so an engine that overrides
+    /// `makeRecap` (to tag the call, say) can still use it.
+    func standardMakeRecap(
+        transcript: String, mode: Mode, progress: @escaping (Double) -> Void
+    ) async throws -> Recap {
         let chunks = TranscriptChunker.chunks(
             transcript, maxCharacters: recapBudget.charactersPerRequest
         )
@@ -57,6 +65,10 @@ extension RecapEngine {
     }
 
     func answer(question: String, persona: String, context: RetrievedContext) async throws -> String {
+        try await standardAnswer(question: question, persona: persona, context: context)
+    }
+
+    func standardAnswer(question: String, persona: String, context: RetrievedContext) async throws -> String {
         try await respond(
             system: persona.isEmpty ? "You answer questions about recap notes." : persona,
             user: Prompts.askPrompt(
@@ -112,6 +124,8 @@ enum RecapEngineFactory {
             return MockRecapEngine()
         case .apiKey:
             return CloudRecapEngine(client: LLMClient(config: settings.providerConfig))
+        case .hosted:
+            return HostedRecapEngine(session: .shared)
         }
     }
 }

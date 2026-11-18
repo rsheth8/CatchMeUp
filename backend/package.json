@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "e2e": "node scripts/e2e.mjs",
     "migrate:local": "wrangler d1 migrations apply catchmeup --local",
-    "migrate:remote": "wrangler d1 migrations apply catchmeup --remote"
+    "migrate:remote": "wrangler d1 migrations apply catchmeup --remote",
+    "dev:harness": "node scripts/dev-harness.mjs"
   },
   "dependencies": {
     "jose": "^6.2.17"

@@ -58,14 +58,25 @@ enum EngineKind: String, CaseIterable, Identifiable {
     case demo
     case onDevice
     case apiKey
+    /// CatchMeUp's own service. Only offered in a build that has a service address.
+    case hosted
 
     var id: String { rawValue }
+
+    /// What the picker offers: Cloud appears only where there is a service to talk to.
+    static var selectable: [EngineKind] {
+        allCases.filter { $0 != .hosted || HostedConfig.isConfigured }
+    }
+
+    /// Whether writing notes needs the network.
+    var usesNetwork: Bool { self == .apiKey || self == .hosted }
 
     var title: String {
         switch self {
         case .demo: return "Demo"
         case .onDevice: return "On-device (Apple)"
         case .apiKey: return "Your API key"
+        case .hosted: return "CatchMeUp Cloud"
         }
     }
 
@@ -74,6 +85,7 @@ enum EngineKind: String, CaseIterable, Identifiable {
         case .demo: return "Explore a populated showcase account: narrated recaps, study practice, meetings, and local source-based answers. No API key needed."
         case .onDevice: return "Apple Intelligence writes the notes right on this iPhone. Free, private, needs iOS 26. Long recordings are covered in several passes, so they take longer."
         case .apiKey: return "Bring a key from Anthropic, OpenAI, Gemini, Groq, Ollama, or any OpenAI-compatible service."
+        case .hosted: return "No key needed. Your transcript text is sent to CatchMeUp, which writes the notes with Claude. A few free recaps a month; Plus writes with a stronger model and allows far more."
         }
     }
 }
@@ -220,6 +232,7 @@ final class AppSettings {
             if provider.needsBaseURL && customBaseURL.isEmpty { return false }
             if providerID == "ollama" { return true }
             return !apiKey.isEmpty
+        case .hosted: return HostedConfig.isConfigured && HostedSession.shared.isSignedIn
         }
     }
 
@@ -232,6 +245,13 @@ final class AppSettings {
             if provider.needsBaseURL && customBaseURL.isEmpty { return "Add the base URL for \(provider.label)." }
             if !isReady { return "Paste your \(provider.label) API key." }
             return "Ready — \(provider.label), \(model)."
+        case .hosted:
+            if !HostedConfig.isConfigured { return "CatchMeUp Cloud isn't available in this build." }
+            if !HostedSession.shared.isSignedIn { return "Sign in to use CatchMeUp Cloud." }
+            guard let quota = HostedSession.shared.quota else { return "Ready — CatchMeUp Cloud." }
+            return quota.isPlus
+                ? "Ready — CatchMeUp Cloud Plus, \(quota.recapsRemaining) recaps left this month."
+                : "Ready — CatchMeUp Cloud, \(quota.recapsRemaining) free \(quota.recapsRemaining == 1 ? "recap" : "recaps") left this month."
         }
     }
 }
@@ -241,7 +261,7 @@ final class AppSettings {
 enum Keychain {
     private static let service = "com.catchmeup.app"
 
-    static func set(_ value: String, for key: String) {
+    static func set(_ value: String, for key: String, afterFirstUnlock: Bool = false) {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
                                 kSecAttrAccount as String: key]
@@ -249,7 +269,9 @@ enum Keychain {
         guard !value.isEmpty, let data = value.data(using: .utf8) else { return }
         var add = q
         add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        add[kSecAttrAccessible as String] = afterFirstUnlock
+            ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 

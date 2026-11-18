@@ -69,6 +69,7 @@ final class AuthManager {
         Keychain.set("", for: "auth.provider")
         Keychain.set("", for: "auth.name")
         Keychain.set("", for: "auth.email")
+        Task { await HostedSession.shared.signOut() }
         isPresentingSignOutGate = true
     }
 }

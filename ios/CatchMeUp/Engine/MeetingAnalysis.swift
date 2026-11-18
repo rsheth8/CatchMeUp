@@ -70,6 +70,10 @@ enum MeetingAnalysis {
 
 extension RecapEngine {
     func extractMeeting(transcript: String, documents: String, agenda: String) async throws -> MeetingExtraction {
+        try await standardExtractMeeting(transcript: transcript, documents: documents, agenda: agenda)
+    }
+
+    func standardExtractMeeting(transcript: String, documents: String, agenda: String) async throws -> MeetingExtraction {
         let prompt = "\(MeetingAnalysis.schema)\nAGENDA (planned, not agreed):\n\(agenda)\nTRANSCRIPT:\n\(transcript)\nPROVIDED DOCUMENTS:\n\(documents)"
         for attempt in 0..<2 {
             let response = try await respond(system: MeetingAnalysis.instructions,

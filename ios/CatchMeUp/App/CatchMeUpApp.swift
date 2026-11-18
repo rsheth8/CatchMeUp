@@ -115,6 +115,18 @@ struct CatchMeUpApp: App {
         if ProcessInfo.processInfo.arguments.contains("-showShowcase") {
             ShowcaseSession.shared.enter()
         }
+        // Signs in to a local CatchMeUp Cloud harness without the Apple sheet:
+        //   -hostedDevSignIn http://127.0.0.1:8788/dev/token
+        // The address hands back a token the harness's fake Apple key signed and
+        // a server nonce. Debug builds only.
+        if let flag = ProcessInfo.processInfo.arguments.firstIndex(of: "-hostedDevSignIn"),
+           flag + 1 < ProcessInfo.processInfo.arguments.count,
+           let url = URL(string: ProcessInfo.processInfo.arguments[flag + 1]),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let idToken = json["idToken"] as? String, let nonce = json["nonce"] as? String {
+            try? await HostedSession.shared.signIn(.apple, idToken: idToken, nonce: nonce)
+        }
         // A launch route for simulator/UI validation. It is compiled out of
         // release builds and never changes a person's library.
         if ProcessInfo.processInfo.arguments.contains("-showKnowledge"),

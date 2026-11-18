@@ -363,7 +363,7 @@ final class ProcessingQueue {
             jobs[index].interrupt(with: .paused)
         }
         Task { await liveActivity.paused() }
-        BackgroundRefresh.schedule(needsNetwork: settings.engineKind == .apiKey)
+        BackgroundRefresh.schedule(needsNetwork: settings.engineKind.usesNetwork)
     }
 
     /// The other side of parking: run by the `BGProcessingTask`, and by the app
@@ -533,14 +533,18 @@ final class ProcessingQueue {
 
         let started = Date()
         let recapEngine = RecapEngineFactory.make(settings)
-        recording.recap = try await recapEngine.makeRecap(
-            transcript: transcript,
-            mode: recording.mode
-        ) { [weak self] progress in
-            Task { @MainActor in
-                guard let self, self.isCurrent(recording.id, attemptID: attemptID, generation: generation),
-                      case .writing = self.job(for: recording.id)?.phase else { return }
-                self.noteWritingProgress(recording.id, progress: recording.mode == .meeting && engine != .demo ? progress * 0.8 : progress)
+        // Every call for this recording shares its id, so CatchMeUp Cloud counts one recap.
+        let jobID = recording.id.uuidString
+        recording.recap = try await HostedCall.$jobID.withValue(jobID) {
+            try await recapEngine.makeRecap(
+                transcript: transcript,
+                mode: recording.mode
+            ) { [weak self] progress in
+                Task { @MainActor in
+                    guard let self, self.isCurrent(recording.id, attemptID: attemptID, generation: generation),
+                          case .writing = self.job(for: recording.id)?.phase else { return }
+                    self.noteWritingProgress(recording.id, progress: recording.mode == .meeting && engine != .demo ? progress * 0.8 : progress)
+                }
             }
         }
         try Task.checkCancellation()
@@ -549,11 +553,13 @@ final class ProcessingQueue {
         if recording.mode == .meeting, engine != .demo {
             do {
                 let attached = MaterialStore.shared.materials(forRecording: recording.id)
-                recording.meeting = try await recapEngine.meetingWorkspace(for: recording, materials: attached) { [weak self] progress in
-                    Task { @MainActor in
-                        guard let self, self.isCurrent(recording.id, attemptID: attemptID, generation: generation),
-                              case .writing = self.job(for: recording.id)?.phase else { return }
-                        self.noteWritingProgress(recording.id, progress: 0.8 + 0.2 * progress)
+                recording.meeting = try await HostedCall.$jobID.withValue(jobID) {
+                    try await recapEngine.meetingWorkspace(for: recording, materials: attached) { [weak self] progress in
+                        Task { @MainActor in
+                            guard let self, self.isCurrent(recording.id, attemptID: attemptID, generation: generation),
+                                  case .writing = self.job(for: recording.id)?.phase else { return }
+                            self.noteWritingProgress(recording.id, progress: 0.8 + 0.2 * progress)
+                        }
                     }
                 }
                 if attached.contains(where: { !$0.state.isReady }) {

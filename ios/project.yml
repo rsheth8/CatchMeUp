@@ -12,7 +12,8 @@ packages:
     from: 0.9.19
   GoogleSignIn-iOS:
     url: https://github.com/google/GoogleSignIn-iOS
-    from: 7.1.0
+    # 9.0 added the custom nonce CatchMeUp Cloud needs for Google sign-in.
+    from: 9.0.0
 
 settings:
   base:

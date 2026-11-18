@@ -41,6 +41,8 @@
 	</array>
 	<key>GIDClientID</key>
 	<string>REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com</string>
+	<key>HostedAPIBaseURL</key>
+	<string></string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>

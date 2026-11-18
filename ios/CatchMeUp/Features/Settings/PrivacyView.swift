@@ -68,7 +68,7 @@ struct PrivacyView: View {
             Text("Your recordings stay yours")
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
-            Text("The short version: the audio never leaves this iPhone, there is no server or analytics, and the only thing that can be sent anywhere is transcript text — to a provider you chose, with a key you supplied.")
+            Text("The short version: the audio never leaves this iPhone, there is no analytics, and the only thing that can be sent anywhere is transcript text — to a provider you chose with your own key, or, if you choose CatchMeUp Cloud, to our service to be written up with Claude.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -87,6 +87,8 @@ struct PrivacyView: View {
         case .apiKey:
             let name = Providers.by(settings.providerID).label
             return "You're using **\(name)**, so transcripts are sent there when a recap is written."
+        case .hosted:
+            return "You're using **CatchMeUp Cloud**, so transcript text is sent to CatchMeUp's service, and from there to Claude, when a recap is written. The audio never leaves this iPhone."
         }
     }
 

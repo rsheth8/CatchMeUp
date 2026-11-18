@@ -117,6 +117,17 @@ read from the Keychain and never printed:
 ANTHROPIC_API_KEY="$(secret get ANTHROPIC_API_KEY)" npm run e2e -- --live
 ```
 
+Pointing the iOS simulator at a local copy (stubbed model, faked Apple key server, no key and no cost):
+
+```bash
+npm run dev:harness    # keep it running; prints the worker and dev-token addresses
+xcrun simctl launch booted com.catchmeup.app -hostedBaseURL http://127.0.0.1:8787 \
+  -engineKind hosted -hostedDevSignIn http://127.0.0.1:8788/dev/token
+```
+
+`-hostedDevSignIn` exists in debug builds only. The iOS tests that use the harness
+(`HostedLiveServerTests`, `HostedCloudUITests`) run when `TEST_RUNNER_HOSTED_HARNESS=1` is set.
+
 First deploy:
 
 1. `npx wrangler login`, then `npx wrangler d1 create catchmeup` and put the printed id in `wrangler.toml`.
@@ -160,7 +171,7 @@ as well as on quality.
 
 ## What is left
 
-1. **iOS client** (`HostedRecapEngine`, sign-in token exchange, quota UI, paywall, error states). The app must call `POST /v1/auth/nonce` first and pass that nonce to Apple and Google; the server rejects any nonce it did not issue.
+1. **iOS client: done** except buying. `HostedRecapEngine`, server-nonce sign-in, quota row, limit sheet and error states are in `ios/CatchMeUp/Hosted/`. The paywall's button says "Plus is coming soon" until StoreKit lands. Study grading and question writing still use the user's own key, so on Cloud they fall back to keyword grading.
 2. **Subscriptions.** StoreKit 2 products, then App Store Server Notifications V2 into `subscriptions` (JWS signature verification, renewals, refunds, grace periods).
 3. **App Attest**, to bind free quota to a genuine install and make farming accounts expensive.
 4. **Privacy.** Transcripts now leave the device. The privacy policy, App Privacy answers, `PrivacyInfo.xcprivacy` and in-app wording must change before any public build.

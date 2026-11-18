@@ -76,7 +76,9 @@ struct MeetingWorkspaceView: View {
             }
             do {
                 let attached = materials.materials(forRecording: recordingID)
-                var result = try await RecapEngineFactory.make(settings).meetingWorkspace(for: recording, materials: attached)
+                var result = try await HostedCall.$jobID.withValue(recording.id.uuidString) {
+                    try await RecapEngineFactory.make(settings).meetingWorkspace(for: recording, materials: attached)
+                }
                 try Task.checkCancellation()
                 if attached.contains(where: { !$0.state.isReady }) {
                     result.analysisNotice = "Some documents aren't ready yet. Refresh again after they finish processing."
@@ -94,6 +96,8 @@ struct MeetingWorkspaceView: View {
         } message: {
             Text(settings.engineKind == .apiKey
                  ? "Relevant transcript and document excerpts will be sent to your configured AI provider. Your edits and completed tasks are kept."
+                 : settings.engineKind == .hosted
+                 ? "Relevant transcript and document excerpts will be sent to CatchMeUp Cloud. This is part of the same recap, so it does not use another one. Your edits and completed tasks are kept."
                  : "This uses the selected engine and keeps your edits and completed tasks. Documents are treated as supplied context, not spoken agreement.")
         }
         .sheet(item: $editingTask) { task in

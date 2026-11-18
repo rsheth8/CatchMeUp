@@ -45,6 +45,7 @@ enum ProcessingStatsStore {
         .demo: ProcessingRates(transcribe: 0.02, write: 0.05, samples: 0),
         .onDevice: ProcessingRates(transcribe: 0.25, write: 7.5, samples: 0),
         .apiKey: ProcessingRates(transcribe: 0.25, write: 1.6, samples: 0),
+        .hosted: ProcessingRates(transcribe: 0.25, write: 1.6, samples: 0),
     ]
 
     /// EMA weight. High enough to adapt to a model or network change within a

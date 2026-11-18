@@ -38,6 +38,12 @@ struct RootView: View {
                 if phase == .active, !ShowcaseSession.shared.isActive { router.consumePendingRoute() }
             }
             .task { if !ShowcaseSession.shared.isActive { router.consumePendingRoute() } }
+            .sheet(item: Binding(
+                get: { HostedSession.shared.limit },
+                set: { HostedSession.shared.limit = $0 }
+            )) { limit in
+                HostedPaywallView(limit: limit)
+            }
             .sheet(isPresented: Binding(
                 get: { needsOnboarding },
                 set: { if !$0 { settings.hasOnboarded = true } }

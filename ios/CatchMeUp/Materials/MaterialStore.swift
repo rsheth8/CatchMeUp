@@ -262,9 +262,12 @@ final class MaterialStore {
         guard let data = try? Data(contentsOf: metadataURL),
               let decoded = try? JSONDecoder.materials.decode([SupplementalMaterial].self, from: data) else { return }
         materials = decoded
+        // Earlier versions kept the extracted text of deleted materials.
+        if materials.contains(where: \.holdsDeletedContent) { save() }
     }
 
     private func save() {
+        Tombstones.erase(in: &materials)
         guard let data = try? JSONEncoder.materials.encode(materials) else { return }
         try? data.write(to: metadataURL, options: .atomic)
     }

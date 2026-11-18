@@ -137,6 +137,7 @@ struct RecapDetailView: View {
         }
         .deleteRecapAlert($deleteTarget) { rec in
             player.stop()
+            queue.cancel(rec.id)
             store.delete(rec)
             dismiss()
         }

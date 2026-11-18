@@ -236,8 +236,10 @@ final class AudioOptimizer {
                 return .skipped
             }
 
-            let filename = try store.audio.replaceAudio(for: recording, with: temporary)
+            // Encoding takes a while. A recap deleted meanwhile must not get a
+            // new audio file, and `recording` may no longer name the current one.
             guard var fresh = store.recording(recordingID) else { return .skipped }
+            let filename = try store.audio.replaceAudio(for: fresh, with: temporary)
             fresh.audioFilename = filename
             fresh.apply(facts)
             fresh.optimizeFailed = false

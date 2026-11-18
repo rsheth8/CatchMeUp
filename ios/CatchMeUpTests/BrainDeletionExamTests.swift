@@ -67,7 +67,7 @@ final class BrainDeletionExamTests: XCTestCase {
         XCTAssertEqual(examTitles, ["History final"], "the state older versions left behind")
 
         library.studySink = study
-        library.retireExamPlansForDeletedBrains()
+        library.retireStudyDataForDeletedRecords()
 
         XCTAssertTrue(study.plans.isEmpty)
     }
@@ -75,19 +75,16 @@ final class BrainDeletionExamTests: XCTestCase {
     func testAnExamThatArrivesBeforeItsBrainIsKept() {
         addExam("Synced ahead of its brain", on: UUID())
 
-        library.retireExamPlansForDeletedBrains()
+        library.retireStudyDataForDeletedRecords()
 
         XCTAssertEqual(examTitles, ["Synced ahead of its brain"])
     }
 
-    func testABrainDeletedOnAnotherDeviceTakesItsExamWithIt() async throws {
+    func testABrainDeletedOnAnotherDeviceTakesItsExamWithIt() {
         let history = addBrain("History")
         addExam("History final", on: history.id)
         let otherDevice = LibraryStore(root: root, isShowcase: true)
 
-        // Saved dates keep whole seconds, and a merge keeps the newer copy, so
-        // the remote delete has to land in a later second than the local edit.
-        try await Task.sleep(for: .seconds(1.1))
         otherDevice.delete(history)
         library.mergeFromDisk()
 

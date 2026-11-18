@@ -654,11 +654,13 @@ final class ProcessingQueue {
         // launch meant a recap you recorded and read this afternoon had nothing
         // to study until you next cold-started the app — long enough that the
         // material was no longer fresh, which is the whole point.
-        study.refreshItems(for: recording, in: store.sortedRecordings)
+        // The recap may have been deleted on another device while this ran.
+        let stillExists = store.recording(recordingID) != nil
+        if stillExists { study.refreshItems(for: recording, in: store.sortedRecordings) }
         StudyNotifier.reschedule(study: study, settings: settings)
         Task { await liveActivity.finish(success: true) }
 
-        if !settings.isShowcase, UIApplication.shared.applicationState != .active {
+        if stillExists, !settings.isShowcase, UIApplication.shared.applicationState != .active {
             RecapNotifier.recapReady(recording)
         }
         forget(recordingID, after: 2.5)

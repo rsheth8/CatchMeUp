@@ -20,6 +20,7 @@ import Observation
 @MainActor
 protocol StudyItemSink: AnyObject {
     func deleteItems(forRecording id: UUID)
+    func deleteItems(forRecordings ids: Set<UUID>)
     func reassign(recordingID: UUID, toBrain brainID: UUID?)
     func deleteExamPlans(forBrains ids: Set<UUID>)
 }
@@ -493,19 +494,27 @@ final class StudyStore: StudyItemSink {
     /// leaves its questions in tomorrow's queue pointing at a source that no
     /// longer exists.
     func deleteItems(forRecording id: UUID) {
+        deleteItems(forRecordings: [id])
+    }
+
+    func deleteItems(forRecordings ids: Set<UUID>) {
         var changed = false
-        for i in items.indices where items[i].recordingID == id && !items[i].deleted {
+        for i in items.indices where ids.contains(items[i].recordingID) && !items[i].deleted {
             items[i].deleted = true
             items[i].updatedAt = Date()
             changed = true
         }
-        if changed { saveItems() }
+        if changed {
+            saveItems()
+            eraseDeletedFromInactiveCopy()
+        }
     }
 
     /// Follows a recap when it's moved to a different course.
     func reassign(recordingID: UUID, toBrain brainID: UUID?) {
         var changed = false
-        for i in items.indices where items[i].recordingID == recordingID && items[i].brainID != brainID {
+        for i in items.indices
+        where items[i].recordingID == recordingID && items[i].brainID != brainID && !items[i].deleted {
             items[i].brainID = brainID
             items[i].updatedAt = Date()
             changed = true
@@ -561,7 +570,10 @@ final class StudyStore: StudyItemSink {
             items[index].updatedAt = .now
             changed = true
         }
-        if changed { saveItems() }
+        if changed {
+            saveItems()
+            eraseDeletedFromInactiveCopy()
+        }
     }
 
     /// Rebuilds one recap's questions against the notes it has *now*.
@@ -627,8 +639,12 @@ final class StudyStore: StudyItemSink {
     func upsert(_ plan: ExamPlan) {
         var p = plan
         p.updatedAt = Date()
-        if let i = examPlans.firstIndex(where: { $0.id == p.id }) { examPlans[i] = p }
-        else { examPlans.append(p) }
+        if let i = examPlans.firstIndex(where: { $0.id == p.id }) {
+            guard !examPlans[i].deleted else { return }
+            examPlans[i] = p
+        } else {
+            examPlans.append(p)
+        }
         savePlans()
     }
 
@@ -637,6 +653,7 @@ final class StudyStore: StudyItemSink {
         examPlans[i].deleted = true
         examPlans[i].updatedAt = Date()
         savePlans()
+        eraseDeletedFromInactiveCopy()
     }
 
     /// An exam belongs to its course, so it goes when the course does. Tombstoned
@@ -648,7 +665,10 @@ final class StudyStore: StudyItemSink {
             examPlans[i].updatedAt = Date()
             changed = true
         }
-        if changed { savePlans() }
+        if changed {
+            savePlans()
+            eraseDeletedFromInactiveCopy()
+        }
     }
 
     /// How much daily work the plan implies: everything in the course, spread
@@ -679,11 +699,71 @@ final class StudyStore: StudyItemSink {
         if let d = coordinatedRead(plansFile), let v = try? dec.decode([ExamPlan].self, from: d) {
             examPlans = v
         }
+        // Earlier versions kept everything in a deleted record.
+        if Tombstones.erase(in: &items) { write(items, to: itemsFile) }
+        if Tombstones.erase(in: &examPlans) { write(examPlans, to: plansFile) }
+        if eraseTypedAnswersToDeletedItems() { write(logs, to: logsFile) }
+        eraseDeletedFromInactiveCopy()
     }
 
-    private func saveItems() { write(items, to: itemsFile) }
-    private func saveLogs()  { write(logs, to: logsFile) }
-    private func savePlans() { write(examPlans, to: plansFile) }
+    private func saveItems() {
+        eraseDeletedContent()
+        write(items, to: itemsFile)
+    }
+
+    private func saveLogs() {
+        eraseDeletedContent()
+        write(logs, to: logsFile)
+    }
+
+    private func savePlans() {
+        eraseDeletedContent()
+        write(examPlans, to: plansFile)
+    }
+
+    private func eraseDeletedContent() {
+        Tombstones.erase(in: &items)
+        Tombstones.erase(in: &examPlans)
+        if eraseTypedAnswersToDeletedItems() { write(logs, to: logsFile) }
+    }
+
+    /// The review itself stays, because streaks and stats count it. What the
+    /// student typed is about the deleted material, so that goes.
+    private func eraseTypedAnswersToDeletedItems() -> Bool {
+        let deletedIDs = Set(items.filter(\.deleted).map(\.id))
+        var changed = false
+        for index in logs.indices where !logs[index].typed.isEmpty && deletedIDs.contains(logs[index].itemID) {
+            logs[index].typed = ""
+            changed = true
+        }
+        return changed
+    }
+
+    /// With iCloud on, the files from before it was turned on stay in the local
+    /// folder and would otherwise keep the words of everything deleted since.
+    private func eraseDeletedFromInactiveCopy() {
+        guard dataDir != localDir else { return }
+        let dec = Self.makeDecoder()
+        let itemsCopy = localDir.appendingPathComponent(itemsName)
+        if let d = coordinatedRead(itemsCopy), let copy = try? dec.decode([StudyItem].self, from: d),
+           let updated = Tombstones.applying(items, to: copy) {
+            write(updated, to: itemsCopy)
+        }
+        let plansCopy = localDir.appendingPathComponent(plansName)
+        if let d = coordinatedRead(plansCopy), let copy = try? dec.decode([ExamPlan].self, from: d),
+           let updated = Tombstones.applying(examPlans, to: copy) {
+            write(updated, to: plansCopy)
+        }
+        let logsCopy = localDir.appendingPathComponent(logsName)
+        let deletedIDs = Set(items.filter(\.deleted).map(\.id))
+        if let d = coordinatedRead(logsCopy), var copy = try? dec.decode([ReviewLog].self, from: d),
+           copy.contains(where: { !$0.typed.isEmpty && deletedIDs.contains($0.itemID) }) {
+            for index in copy.indices where deletedIDs.contains(copy[index].itemID) {
+                copy[index].typed = ""
+            }
+            write(copy, to: logsCopy)
+        }
+    }
 
     private func write<T: Encodable>(_ value: T, to url: URL) {
         let enc = JSONEncoder()
@@ -710,18 +790,22 @@ final class StudyStore: StudyItemSink {
     func mergeFromDisk() {
         let dec = Self.makeDecoder()
         var changed = false
+        var fileNeedsRewrite = false
 
+        // Questions keep newest-wins. A rewrite retires the unanswered ones, and
+        // one answered on another device since then should survive with its
+        // schedule. Deleting a recap reaches them through its own tombstone.
         if let d = coordinatedRead(itemsFile),
            let incoming = try? dec.decode([StudyItem].self, from: d) {
-            let merged = Self.mergeNewest(local: items, remote: incoming,
-                                          id: { $0.id }, newer: { $0.updatedAt })
-            if Set(merged) != Set(items) { items = merged; changed = true }
+            let merge = Tombstones.merge(local: items, remote: incoming, deletionWins: false)
+            if Set(merge.records) != Set(items) { items = merge.records; changed = true }
+            fileNeedsRewrite = fileNeedsRewrite || merge.remoteHoldsDeletedContent
         }
         if let d = coordinatedRead(plansFile),
            let incoming = try? dec.decode([ExamPlan].self, from: d) {
-            let merged = Self.mergeNewest(local: examPlans, remote: incoming,
-                                          id: { $0.id }, newer: { $0.updatedAt })
-            if Set(merged) != Set(examPlans) { examPlans = merged; changed = true }
+            let merge = Tombstones.merge(local: examPlans, remote: incoming, deletionWins: true)
+            if Set(merge.records) != Set(examPlans) { examPlans = merge.records; changed = true }
+            fileNeedsRewrite = fileNeedsRewrite || merge.remoteHoldsDeletedContent
         }
         // Reviews are historical events — union them, never overwrite. Two
         // devices studying offline should end up with both sets.
@@ -734,23 +818,15 @@ final class StudyStore: StudyItemSink {
                 if logs.count > maxLogs { logs.removeFirst(logs.count - maxLogs) }
                 changed = true
             }
-        }
-
-        if changed { saveItems(); saveLogs(); savePlans() }
-    }
-
-    private static func mergeNewest<E: Hashable>(
-        local: [E], remote: [E], id: (E) -> UUID, newer: (E) -> Date
-    ) -> [E] {
-        var byID: [UUID: E] = [:]
-        for e in local { byID[id(e)] = e }
-        for e in remote {
-            if let existing = byID[id(e)] {
-                if newer(e) >= newer(existing) { byID[id(e)] = e }
-            } else {
-                byID[id(e)] = e
+            let deletedIDs = Set(items.filter(\.deleted).map(\.id))
+            if incoming.contains(where: { !$0.typed.isEmpty && deletedIDs.contains($0.itemID) }) {
+                fileNeedsRewrite = true
             }
         }
-        return Array(byID.values)
+
+        if changed || fileNeedsRewrite {
+            saveItems(); saveLogs(); savePlans()
+            eraseDeletedFromInactiveCopy()
+        }
     }
 }

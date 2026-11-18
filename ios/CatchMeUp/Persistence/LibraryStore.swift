@@ -119,24 +119,43 @@ final class LibraryStore {
 
     // MARK: - Mutations
 
+    /// A delete is final, so a copy saved by work that started before it (a
+    /// processing job, an open editor) is ignored rather than restoring the recap.
     func upsert(_ recording: Recording) {
         var r = recording
         r.updatedAt = Date()
-        if let i = recordings.firstIndex(where: { $0.id == r.id }) { recordings[i] = r }
-        else { recordings.append(r) }
+        if let i = recordings.firstIndex(where: { $0.id == r.id }) {
+            guard !recordings[i].deleted else { return }
+            recordings[i] = r
+        } else {
+            recordings.append(r)
+        }
         saveRecordings()
     }
 
+    /// `recording` may be out of date: the optimizer can rename the audio while
+    /// the confirmation is on screen. The stored copy says which file exists now.
     func delete(_ recording: Recording) {
-        audio.removeAudio(for: recording)
+        var copies = [recording]
         if let i = recordings.firstIndex(where: { $0.id == recording.id }) {
+            copies.append(recordings[i])
             recordings[i].deleted = true
             recordings[i].updatedAt = Date()
         }
+        removeAudio(of: copies, keepingFilesOf: recordings)
         // Tombstone the questions in the same breath. Both sides soft-delete,
         // so this still merges correctly across devices.
         studySink?.deleteItems(forRecording: recording.id)
         saveRecordings()
+        eraseDeletedFromInactiveCopy()
+    }
+
+    private func removeAudio(of copies: [Recording], keepingFilesOf records: [Recording]) {
+        let inUse = Set(records.filter { !$0.deleted }.compactMap(\.audioFilename))
+        for copy in copies {
+            guard let name = copy.audioFilename, !inUse.contains(name) else { continue }
+            audio.removeAudio(for: copy)
+        }
     }
 
     /// Renames a recap. The model-written title wins in the UI, so set both.
@@ -190,8 +209,12 @@ final class LibraryStore {
     func upsert(_ brain: Brain) {
         var b = brain
         b.updatedAt = Date()
-        if let i = brains.firstIndex(where: { $0.id == b.id }) { brains[i] = b }
-        else { brains.append(b) }
+        if let i = brains.firstIndex(where: { $0.id == b.id }) {
+            guard !brains[i].deleted else { return }
+            brains[i] = b
+        } else {
+            brains.append(b)
+        }
         saveBrains()
     }
 
@@ -202,14 +225,16 @@ final class LibraryStore {
             brains[i].updatedAt = Date()
         }
         saveBrains()
-        retireExamPlansForDeletedBrains()
+        eraseDeletedFromInactiveCopy()
+        retireStudyDataForDeletedRecords()
     }
 
-    /// Clears exams whose brain was deleted, including any left behind before
-    /// exams were deleted with their brain. Goes by tombstones rather than by
-    /// which brains are missing: over iCloud an exam can arrive before its brain,
-    /// and that exam is still good.
-    func retireExamPlansForDeletedBrains() {
+    /// Clears questions whose recap was deleted and exams whose brain was,
+    /// including any that arrived from another device afterwards. Goes by
+    /// tombstones rather than by what is missing: over iCloud an exam can arrive
+    /// before its brain, and that exam is still good.
+    func retireStudyDataForDeletedRecords() {
+        studySink?.deleteItems(forRecordings: Set(recordings.filter(\.deleted).map(\.id)))
         studySink?.deleteExamPlans(forBrains: Set(brains.filter(\.deleted).map(\.id)))
     }
 
@@ -369,17 +394,46 @@ final class LibraryStore {
         let dec = Self.makeDecoder()
         if let d = coordinatedRead(recordingsFile), let r = try? dec.decode([Recording].self, from: d) {
             recordings = r
+            // Earlier versions kept everything in a deleted record.
+            removeAudio(of: r.filter(\.holdsDeletedContent), keepingFilesOf: r)
+            if Tombstones.erase(in: &recordings) { write(recordings, to: recordingsFile) }
         }
         if let d = coordinatedRead(brainsFile), let b = try? dec.decode([Brain].self, from: d) {
             brains = b
+            if Tombstones.erase(in: &brains) { write(brains, to: brainsFile) }
         }
+        eraseDeletedFromInactiveCopy()
     }
 
     private func saveRecordings() {
+        Tombstones.erase(in: &recordings)
         write(recordings, to: recordingsFile)
         if !isShowcase { SpotlightIndexer.replace(with: recordings) }
     }
-    private func saveBrains() { write(brains, to: brainsFile) }
+
+    private func saveBrains() {
+        Tombstones.erase(in: &brains)
+        write(brains, to: brainsFile)
+    }
+
+    /// Turning iCloud on leaves the earlier files in the local folder, and they
+    /// would otherwise keep the words of everything deleted since.
+    private func eraseDeletedFromInactiveCopy() {
+        guard usingCloud else { return }
+        eraseDeleted(fromCopyIn: localDir)
+    }
+
+    func eraseDeleted(fromCopyIn folder: URL) {
+        eraseDeleted(from: folder.appendingPathComponent(recordingsName), using: recordings)
+        eraseDeleted(from: folder.appendingPathComponent(brainsName), using: brains)
+    }
+
+    private func eraseDeleted<Record: Tombstoned & Codable>(from url: URL, using current: [Record]) {
+        guard let data = coordinatedRead(url),
+              let copy = try? Self.makeDecoder().decode([Record].self, from: data),
+              let updated = Tombstones.applying(current, to: copy) else { return }
+        write(updated, to: url)
+    }
 
     private func write<T: Encodable>(_ value: T, to url: URL) {
         let enc = JSONEncoder()
@@ -406,38 +460,38 @@ final class LibraryStore {
     func mergeFromDisk() {
         let dec = Self.makeDecoder()
         var changed = false
+        var fileNeedsRewrite = false
 
         if let d = coordinatedRead(recordingsFile),
            let incoming = try? dec.decode([Recording].self, from: d) {
-            let merged = Self.merge(local: recordings, remote: incoming) { $0.id } newer: { $0.updatedAt }
-            if Set(merged) != Set(recordings) { recordings = merged; changed = true }
+            let merge = mergeRecordings(local: recordings, remote: incoming)
+            if Set(merge.records) != Set(recordings) { recordings = merge.records; changed = true }
+            fileNeedsRewrite = fileNeedsRewrite || merge.remoteHoldsDeletedContent
         }
         if let d = coordinatedRead(brainsFile),
            let incoming = try? dec.decode([Brain].self, from: d) {
-            let merged = Self.merge(local: brains, remote: incoming) { $0.id } newer: { $0.updatedAt }
-            if Set(merged) != Set(brains) { brains = merged; changed = true }
+            let merge = Tombstones.merge(local: brains, remote: incoming, deletionWins: true)
+            if Set(merge.records) != Set(brains) { brains = merge.records; changed = true }
+            fileNeedsRewrite = fileNeedsRewrite || merge.remoteHoldsDeletedContent
         }
-        if changed {
+        if changed || fileNeedsRewrite {
             saveRecordings(); saveBrains()
-            retireExamPlansForDeletedBrains()
+            eraseDeletedFromInactiveCopy()
         }
+        // Not only when something changed: the study files sync separately, so
+        // a question can come back after its recap's delete already landed.
+        retireStudyDataForDeletedRecords()
         if syncEnabled { syncStatus = usingCloud ? .synced : .unavailable }
     }
 
-    /// Union by identity, keeping whichever copy was updated most recently.
-    private static func merge<E: Hashable>(
-        local: [E], remote: [E], id: (E) -> UUID, newer: (E) -> Date
-    ) -> [E] {
-        var byID: [UUID: E] = [:]
-        for e in local { byID[id(e)] = e }
-        for e in remote {
-            if let existing = byID[id(e)] {
-                if newer(e) >= newer(existing) { byID[id(e)] = e }
-            } else {
-                byID[id(e)] = e
-            }
-        }
-        return Array(byID.values)
+    /// A recap deleted elsewhere takes its audio with it here too, including any
+    /// copy this device was still holding locally.
+    private func mergeRecordings(local: [Recording], remote: [Recording]) -> Tombstones.Merge<Recording> {
+        let merge = Tombstones.merge(local: local, remote: remote, deletionWins: true)
+        let deletedIDs = Set(merge.records.filter(\.deleted).map(\.id))
+        removeAudio(of: (local + remote).filter { deletedIDs.contains($0.id) },
+                    keepingFilesOf: merge.records)
+        return merge
     }
 
     // MARK: - Metadata query (live iCloud updates)
@@ -526,16 +580,16 @@ final class LibraryStore {
         var mergedRecordings = recordings
         var mergedBrains = brains
 
-        for root in [localDir, CloudSync.documentsURL].compactMap({ $0 }) {
+        let roots = [localDir, CloudSync.documentsURL].compactMap { $0 }
+        for root in roots {
             if let data = coordinatedRead(root.appendingPathComponent(recordingsName)),
                let incoming = try? decoder.decode([Recording].self, from: data) {
-                mergedRecordings = Self.merge(local: mergedRecordings, remote: incoming) { $0.id }
-                    newer: { $0.updatedAt }
+                mergedRecordings = mergeRecordings(local: mergedRecordings, remote: incoming).records
             }
             if let data = coordinatedRead(root.appendingPathComponent(brainsName)),
                let incoming = try? decoder.decode([Brain].self, from: data) {
-                mergedBrains = Self.merge(local: mergedBrains, remote: incoming) { $0.id }
-                    newer: { $0.updatedAt }
+                mergedBrains = Tombstones.merge(local: mergedBrains, remote: incoming,
+                                                deletionWins: true).records
             }
         }
 
@@ -543,6 +597,7 @@ final class LibraryStore {
         brains = mergedBrains
         write(recordings, to: destination.appendingPathComponent(recordingsName))
         write(brains, to: destination.appendingPathComponent(brainsName))
+        for root in roots where root != destination { eraseDeleted(fromCopyIn: root) }
         if !isShowcase { SpotlightIndexer.replace(with: recordings) }
     }
 

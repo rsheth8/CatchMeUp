@@ -99,6 +99,7 @@ struct LibraryView: View {
                 }
             }
             .deleteRecapAlert($deleteTarget) { rec in
+                queue.cancel(rec.id)
                 withAnimation(.quick) { store.delete(rec) }
             }
         }

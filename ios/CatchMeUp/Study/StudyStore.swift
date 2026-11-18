@@ -21,6 +21,7 @@ import Observation
 protocol StudyItemSink: AnyObject {
     func deleteItems(forRecording id: UUID)
     func reassign(recordingID: UUID, toBrain brainID: UUID?)
+    func deleteExamPlans(forBrains ids: Set<UUID>)
 }
 
 @MainActor
@@ -41,6 +42,11 @@ final class StudyStore: StudyItemSink {
 
     /// Set while a background mint is running, so the UI can say so.
     private(set) var isMinting = false
+
+    /// When the counts were last taken. Passing time changes what's due without
+    /// changing any stored value, so the counts read this to give SwiftUI
+    /// something to observe, and `refreshCounts` moves it forward.
+    private(set) var countsAsOf = Date()
 
     private let localDir: URL
     private let itemsName = "study-items.json"
@@ -104,8 +110,26 @@ final class StudyStore: StudyItemSink {
 
     // MARK: - Counts
 
+    func refreshCounts(at now: Date = .now) {
+        countsAsOf = now
+    }
+
+    /// The next moment the counts will change on their own: a card coming due,
+    /// or midnight, when the daily allowance of new cards resets.
+    func nextCountChange(after now: Date) -> Date {
+        let calendar = Calendar.current
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
+            ?? now.addingTimeInterval(86_400)
+        let nextDue = activeItems
+            .filter { !$0.isNew && $0.memory.due > now }
+            .map(\.memory.due)
+            .min()
+        return min(nextDue ?? midnight, midnight)
+    }
+
     func dueCount(brainID: UUID? = nil, at now: Date = .now) -> Int {
-        activeItems.filter {
+        _ = countsAsOf
+        return activeItems.filter {
             (brainID == nil || $0.brainID == brainID) && !$0.isNew && $0.memory.due <= now
         }.count
     }
@@ -613,6 +637,18 @@ final class StudyStore: StudyItemSink {
         examPlans[i].deleted = true
         examPlans[i].updatedAt = Date()
         savePlans()
+    }
+
+    /// An exam belongs to its course, so it goes when the course does. Tombstoned
+    /// like any other delete, so other devices drop it too.
+    func deleteExamPlans(forBrains ids: Set<UUID>) {
+        var changed = false
+        for i in examPlans.indices where !examPlans[i].deleted && ids.contains(examPlans[i].brainID) {
+            examPlans[i].deleted = true
+            examPlans[i].updatedAt = Date()
+            changed = true
+        }
+        if changed { savePlans() }
     }
 
     /// How much daily work the plan implies: everything in the course, spread

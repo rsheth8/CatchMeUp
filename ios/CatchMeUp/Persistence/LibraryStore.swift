@@ -202,6 +202,15 @@ final class LibraryStore {
             brains[i].updatedAt = Date()
         }
         saveBrains()
+        retireExamPlansForDeletedBrains()
+    }
+
+    /// Clears exams whose brain was deleted, including any left behind before
+    /// exams were deleted with their brain. Goes by tombstones rather than by
+    /// which brains are missing: over iCloud an exam can arrive before its brain,
+    /// and that exam is still good.
+    func retireExamPlansForDeletedBrains() {
+        studySink?.deleteExamPlans(forBrains: Set(brains.filter(\.deleted).map(\.id)))
     }
 
     // MARK: - Audio lifecycle
@@ -408,7 +417,10 @@ final class LibraryStore {
             let merged = Self.merge(local: brains, remote: incoming) { $0.id } newer: { $0.updatedAt }
             if Set(merged) != Set(brains) { brains = merged; changed = true }
         }
-        if changed { saveRecordings(); saveBrains() }
+        if changed {
+            saveRecordings(); saveBrains()
+            retireExamPlansForDeletedBrains()
+        }
         if syncEnabled { syncStatus = usingCloud ? .synced : .unavailable }
     }
 

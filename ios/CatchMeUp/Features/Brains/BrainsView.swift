@@ -3,11 +3,13 @@ import SwiftUI
 struct BrainsView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(MaterialStore.self) private var materials
+    @Environment(StudyStore.self) private var study
     @Environment(AppRouter.self) private var router
     @Environment(\.guidedTour) private var tour
     @State private var showNew = false
     @State private var newName = ""
     @State private var newMode: Mode = .lecture
+    @State private var deleteTarget: Brain?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -60,7 +62,35 @@ struct BrainsView: View {
                         .tourHost(tour)
                 }
             }
+            // Deleting a brain syncs to every device and has no undo, though
+            // the recaps inside it survive.
+            .alert("Delete this brain?",
+                   isPresented: Binding(
+                     get: { deleteTarget != nil },
+                     set: { if !$0 { deleteTarget = nil } }
+                   ),
+                   presenting: deleteTarget) { brain in
+                Button("Delete", role: .destructive) {
+                    Haptics.warning()
+                    withAnimation(.quick) { store.delete(brain) }
+                    deleteTarget = nil
+                }
+                Button("Cancel", role: .cancel) { deleteTarget = nil }
+            } message: { brain in
+                Text(deleteMessage(for: brain))
+            }
         }
+    }
+
+    private func deleteMessage(for brain: Brain) -> String {
+        let exams = study.plans.filter { $0.brainID == brain.id }
+        let examNote: String
+        switch exams.count {
+        case 0: examNote = ""
+        case 1: examNote = " Its exam \"\(exams[0].title)\" will also be deleted."
+        default: examNote = " Its \(exams.count) exams will also be deleted."
+        }
+        return "\"\(brain.name)\" will be removed on this device and any others using the same iCloud account. Its recaps and study questions are kept, but its materials will no longer be listed together.\(examNote) This can't be undone."
     }
 
     @ViewBuilder
@@ -114,7 +144,7 @@ struct BrainsView: View {
         .accessibilityValue(brainAccessibilityValue(brain))
         .contextMenu {
             Button(role: .destructive) {
-                withAnimation(.quick) { store.delete(brain) }
+                deleteTarget = brain
             } label: { Label("Delete brain", systemImage: "trash") }
         }
     }

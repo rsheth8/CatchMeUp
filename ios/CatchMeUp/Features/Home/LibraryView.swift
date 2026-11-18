@@ -49,6 +49,7 @@ struct LibraryView: View {
     @State private var renameTarget: Recording?
     @State private var renameText = ""
     @State private var importError = false
+    @State private var deleteTarget: Recording?
 
     var body: some View {
         @Bindable var router = router
@@ -97,6 +98,9 @@ struct LibraryView: View {
                     renameTarget = nil
                 }
             }
+            .deleteRecapAlert($deleteTarget) { rec in
+                withAnimation(.quick) { store.delete(rec) }
+            }
         }
     }
 
@@ -130,9 +134,12 @@ struct LibraryView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                             .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    withAnimation(.quick) { store.delete(rec) }
+                                // Not `role: .destructive`: that role makes the
+                                // list remove the row before the alert is answered.
+                                Button {
+                                    deleteTarget = rec
                                 } label: { Label("Delete", systemImage: "trash") }
+                                .tint(.red)
                             }
                             .contextMenu { rowMenu(rec) }
                         }
@@ -380,7 +387,7 @@ struct LibraryView: View {
         }
 
         Button(role: .destructive) {
-            withAnimation(.quick) { store.delete(rec) }
+            deleteTarget = rec
         } label: { Label("Delete", systemImage: "trash") }
     }
 

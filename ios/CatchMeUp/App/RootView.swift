@@ -35,9 +35,21 @@ struct RootView: View {
                 if !ShowcaseSession.shared.isActive { router.consumePendingRoute() }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active, !ShowcaseSession.shared.isActive { router.consumePendingRoute() }
+                guard phase == .active else { return }
+                study.refreshCounts()
+                if !ShowcaseSession.shared.isActive { router.consumePendingRoute() }
             }
             .task { if !ShowcaseSession.shared.isActive { router.consumePendingRoute() } }
+            // Restarts whenever the next change moves: after each refresh, and
+            // after a review reschedules a card.
+            .task(id: study.nextCountChange(after: study.countsAsOf)) {
+                let target = study.nextCountChange(after: study.countsAsOf)
+                // A moment past the target, so the card is due when counted.
+                let delay = max(target.timeIntervalSinceNow, 0) + 1
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+                study.refreshCounts()
+            }
             .sheet(isPresented: Binding(
                 get: { needsOnboarding },
                 set: { if !$0 { settings.hasOnboarded = true } }

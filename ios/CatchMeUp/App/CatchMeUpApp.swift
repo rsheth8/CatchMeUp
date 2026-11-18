@@ -99,6 +99,7 @@ struct CatchMeUpApp: App {
         // Any recap finished while the app was closed gets its questions now,
         // so the Study tab's badge is right on the first frame the user sees.
         study.mergeFromDisk()
+        store.retireExamPlansForDeletedBrains()
         study.mintOffline(for: store.sortedRecordings)
         study.mintOffline(for: materials.visibleMaterials)
         materials.resumePending()

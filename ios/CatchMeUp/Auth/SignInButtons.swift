@@ -23,8 +23,10 @@ struct SignInButtons: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 46)
 
-            GoogleSignInButton(action: signInWithGoogle)
-                .frame(height: 46)
+            if GoogleSignInConfig.isAvailable {
+                GoogleSignInButton(action: signInWithGoogle)
+                    .frame(height: 46)
+            }
         }
     }
 
@@ -35,8 +37,12 @@ struct SignInButtons: View {
         else { return }
         GIDSignIn.sharedInstance.signIn(withPresenting: root) { result, error in
             guard error == nil, let user = result?.user else { return }
-            auth.completeGoogleSignIn(name: user.profile?.name, email: user.profile?.email)
-            onDone()
+            let name = user.profile?.name
+            let email = user.profile?.email
+            Task { @MainActor in
+                auth.completeGoogleSignIn(name: name, email: email)
+                onDone()
+            }
         }
     }
 }

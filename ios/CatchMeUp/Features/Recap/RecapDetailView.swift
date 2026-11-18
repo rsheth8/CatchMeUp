@@ -26,6 +26,7 @@ struct RecapDetailView: View {
     @State private var isFetchingAudio = false
     @State private var audioError: String?
     @State private var confirmRemoveAudio = false
+    @State private var deleteTarget: Recording?
     @State private var exported: ExportedFile?
     @State private var isExporting = false
 
@@ -133,6 +134,11 @@ struct RecapDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text(removeAudioWarning)
+        }
+        .deleteRecapAlert($deleteTarget) { rec in
+            player.stop()
+            store.delete(rec)
+            dismiss()
         }
         .sheet(item: $exported) { file in
             ShareSheet(url: file.url)
@@ -827,7 +833,7 @@ struct RecapDetailView: View {
                     Divider()
 
                     Button(role: .destructive) {
-                        store.delete(rec); dismiss()
+                        deleteTarget = rec
                     } label: { Label("Delete", systemImage: "trash") }
                 } label: {
                     if isExporting {

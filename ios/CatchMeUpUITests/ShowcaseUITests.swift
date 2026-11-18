@@ -56,19 +56,35 @@ final class ShowcaseUITests: XCTestCase {
         expectation(for: ready, evaluatedWith: exit)
         waitForExpectations(timeout: 60)
         snapshot(app, "Populated showcase")
-        tour.tap()
-        XCTAssertTrue(app.navigationBars["Meet your showcase"].waitForExistence(timeout: 5))
-        app.buttons.containing(.staticText, identifier: "Practice for an exam").firstMatch.tap()
+        startGuidedTour("Practice for an exam", from: tour, in: app)
         XCTAssertTrue(app.tabBars.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Study'")).firstMatch.isSelected)
         snapshot(app, "Study showcase")
-        tour.tap()
-        app.buttons.containing(.staticText, identifier: "Explore connected ideas").firstMatch.tap()
+        // A running guided tour dims the showcase bar and blocks its buttons,
+        // so each tour has to be skipped before the bar can be used again.
+        skipGuidedTour(in: app)
+        startGuidedTour("Explore connected ideas", from: tour, in: app)
         XCTAssertTrue(app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Computer Science'")
         ).firstMatch.waitForExistence(timeout: 5))
         snapshot(app, "Connected brains")
+        skipGuidedTour(in: app)
         exit.tap()
         XCTAssertTrue(tour.waitForNonExistence(timeout: 5))
+    }
+
+    private func startGuidedTour(_ title: String, from tour: XCUIElement, in app: XCUIApplication) {
+        tour.tap()
+        XCTAssertTrue(app.navigationBars["Meet your showcase"].waitForExistence(timeout: 5))
+        let start = app.buttons["tour.start.\(title)"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.buttons["tour.skip"].waitForExistence(timeout: 5))
+    }
+
+    private func skipGuidedTour(in app: XCUIApplication) {
+        let skip = app.buttons["tour.skip"]
+        skip.tap()
+        XCTAssertTrue(skip.waitForNonExistence(timeout: 5))
     }
 
     private func snapshot(_ app: XCUIApplication, _ name: String) {

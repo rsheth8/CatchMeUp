@@ -581,6 +581,7 @@ final class StudyStore: StudyItemSink {
     /// Adds the model-written application questions on top. Safe to call
     /// repeatedly; does nothing without a working provider config.
     func enrich(_ recordings: [Recording], config: ProviderConfig) async {
+        guard config.sharingAllowed else { return }
         guard !config.apiKey.isEmpty || config.baseURL?.contains("localhost") == true else { return }
         guard !isMinting else { return }
         isMinting = true

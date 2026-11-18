@@ -50,6 +50,9 @@ struct ProviderConfig {
     var baseURL: String?
     var model: String
     var apiKey: String
+    /// Whether the user has agreed to send content to this destination. Off
+    /// unless stated, so a config built anywhere else can't send by accident.
+    var sharingAllowed = false
 }
 
 // MARK: - Engine choice
@@ -92,9 +95,19 @@ final class AppSettings {
 
     var hasOnboarded: Bool { didSet { d.set(hasOnboarded, forKey: "hasOnboarded") } }
     var engineKind: EngineKind { didSet { d.set(engineKind.rawValue, forKey: "engineKind") } }
-    var providerID: String { didSet { d.set(providerID, forKey: "providerID") } }
+    var providerID: String {
+        didSet {
+            d.set(providerID, forKey: "providerID")
+            reloadKey()
+        }
+    }
     var model: String { didSet { d.set(model, forKey: "model") } }
-    var customBaseURL: String { didSet { d.set(customBaseURL, forKey: "customBaseURL") } }
+    var customBaseURL: String {
+        didSet {
+            d.set(customBaseURL, forKey: "customBaseURL")
+            reloadKey()
+        }
+    }
     var defaultMode: Mode { didSet { d.set(defaultMode.rawValue, forKey: "defaultMode") } }
 
     // MARK: Audio storage
@@ -142,14 +155,29 @@ final class AppSettings {
     /// the app does, so it's a switch.
     var prequestions: Bool { didSet { d.set(prequestions, forKey: "prequestions") } }
 
-    /// Kept in the Keychain, not UserDefaults.
+    /// The key for the selected provider. Each destination has its own Keychain
+    /// entry, so switching providers can never send one company's key to another.
     var apiKey: String {
-        didSet { if !isShowcase { Keychain.set(apiKey, for: "apiKey") } }
+        get { loadedKey }
+        set {
+            guard isShowcase || keySlot != nil else { return }
+            loadedKey = newValue
+            if !isShowcase, let keySlot { Keychain.set(newValue, for: keySlot) }
+        }
+    }
+    private var loadedKey: String
+
+    /// Destinations the user has explicitly agreed to send content to.
+    private var sharingConsents: Set<String> {
+        didSet { d.set(sharingConsents.sorted(), forKey: Self.sharingConsentsKey) }
     }
 
     private let d: UserDefaults
+    private static let sharingConsentsKey = "aiSharingConsents.v1"
+    private static let legacyKeyAccount = "apiKey"
 
     init(defaults: UserDefaults = .standard, isShowcase: Bool = false) {
+        if !isShowcase { Keychain.reconcileInstall() }
         self.isShowcase = isShowcase
         d = defaults
         let dd = defaults
@@ -180,7 +208,88 @@ final class AppSettings {
         reviewReminder = dd.object(forKey: "reviewReminder") as? Bool ?? true
         reviewReminderHour = dd.object(forKey: "reviewReminderHour") as? Int ?? 18
         prequestions = dd.object(forKey: "prequestions") as? Bool ?? true
-        apiKey = isShowcase ? "" : (Keychain.get("apiKey") ?? "")
+        sharingConsents = Set(dd.stringArray(forKey: Self.sharingConsentsKey) ?? [])
+
+        let storedProvider = Providers.by(dd.string(forKey: "providerID") ?? "anthropic")
+        let slot = Self.keySlot(provider: storedProvider, customBaseURL: dd.string(forKey: "customBaseURL") ?? "")
+        if isShowcase {
+            loadedKey = ""
+        } else {
+            Self.migrateLegacyKey(to: slot)
+            loadedKey = slot.flatMap(Keychain.get) ?? ""
+        }
+    }
+
+    /// Earlier builds kept one key for every provider. It most likely belongs
+    /// to the provider selected now, and nowhere else is safe to assume.
+    private static func migrateLegacyKey(to slot: String?) {
+        guard let legacy = Keychain.get(legacyKeyAccount) else { return }
+        if let slot, Keychain.get(slot) == nil { Keychain.set(legacy, for: slot) }
+        Keychain.set("", for: legacyKeyAccount)
+    }
+
+    private func reloadKey() {
+        guard !isShowcase else { return }
+        loadedKey = keySlot.flatMap(Keychain.get) ?? ""
+    }
+
+    // MARK: Where content goes
+
+    /// Fixed providers always use their own address. Only the providers that
+    /// ask for a base URL ever read the user's.
+    private static func baseURL(provider: Provider, customBaseURL: String) -> String? {
+        guard provider.needsBaseURL else { return provider.baseURL }
+        return customBaseURL.isEmpty ? provider.baseURL : customBaseURL
+    }
+
+    /// Identifies who receives content. A custom provider is identified by its
+    /// server, because a different server is a different recipient.
+    private static func destination(provider: Provider, customBaseURL: String) -> String? {
+        guard provider.needsBaseURL else { return provider.id }
+        guard let raw = baseURL(provider: provider, customBaseURL: customBaseURL),
+              let parts = URLComponents(string: raw),
+              let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = parts.host?.lowercased(), !host.isEmpty
+        else { return nil }
+        let port = parts.port.map { ":\($0)" } ?? ""
+        return "\(provider.id)|\(scheme)://\(host)\(port)"
+    }
+
+    /// Ollama runs without a key, so it has nowhere to store or send one.
+    private static func keySlot(provider: Provider, customBaseURL: String) -> String? {
+        guard provider.id != "ollama",
+              let destination = destination(provider: provider, customBaseURL: customBaseURL)
+        else { return nil }
+        return "apiKey.\(destination)"
+    }
+
+    private var keySlot: String? { Self.keySlot(provider: provider, customBaseURL: customBaseURL) }
+
+    /// Nil until a provider that needs a base URL has a valid one.
+    var sharingDestination: String? {
+        Self.destination(provider: provider, customBaseURL: customBaseURL)
+    }
+
+    /// The name shown when asking for permission.
+    var sharingRecipient: String {
+        guard provider.needsBaseURL else { return provider.label }
+        let raw = Self.baseURL(provider: provider, customBaseURL: customBaseURL) ?? ""
+        return URLComponents(string: raw)?.host ?? provider.label
+    }
+
+    var hasSharingConsent: Bool {
+        guard !isShowcase, let sharingDestination else { return false }
+        return sharingConsents.contains(sharingDestination)
+    }
+
+    func grantSharingConsent() {
+        guard !isShowcase, let sharingDestination else { return }
+        sharingConsents.insert(sharingDestination)
+    }
+
+    func revokeSharingConsent() {
+        guard let sharingDestination else { return }
+        sharingConsents.remove(sharingDestination)
     }
 
     /// Scheduler configuration assembled from the user's settings.
@@ -199,18 +308,27 @@ final class AppSettings {
     var provider: Provider { Providers.by(providerID) }
 
     func selectProvider(_ id: String) {
-        providerID = id
         let p = Providers.by(id)
+        // Earlier builds copied the preset's address into this field. Don't
+        // let a custom provider inherit it as though the user had typed it.
+        if p.needsBaseURL, Providers.all.contains(where: { !$0.needsBaseURL && $0.baseURL == customBaseURL }) {
+            customBaseURL = ""
+        }
+        providerID = id
         model = p.defaultModel
-        if let b = p.baseURL, !p.needsBaseURL { customBaseURL = b }
     }
 
     var providerConfig: ProviderConfig {
         if isShowcase { return ProviderConfig(kind: .anthropic, baseURL: nil, model: "demo", apiKey: "") }
         let p = provider
-        let base = customBaseURL.isEmpty ? p.baseURL : customBaseURL
-        return ProviderConfig(kind: p.kind, baseURL: base, model: model, apiKey: apiKey)
+        return ProviderConfig(kind: p.kind,
+                              baseURL: Self.baseURL(provider: p, customBaseURL: customBaseURL),
+                              model: model,
+                              apiKey: apiKey,
+                              sharingAllowed: hasSharingConsent)
     }
+
+    private var needsProviderKey: Bool { providerID != "ollama" && apiKey.isEmpty }
 
     var isReady: Bool {
         switch engineKind {
@@ -218,8 +336,8 @@ final class AppSettings {
         case .onDevice: return true
         case .apiKey:
             if provider.needsBaseURL && customBaseURL.isEmpty { return false }
-            if providerID == "ollama" { return true }
-            return !apiKey.isEmpty
+            if sharingDestination == nil || needsProviderKey { return false }
+            return hasSharingConsent
         }
     }
 
@@ -230,7 +348,9 @@ final class AppSettings {
             return FoundationBridge.availabilityText
         case .apiKey:
             if provider.needsBaseURL && customBaseURL.isEmpty { return "Add the base URL for \(provider.label)." }
-            if !isReady { return "Paste your \(provider.label) API key." }
+            if sharingDestination == nil { return "Enter a valid base URL for \(provider.label)." }
+            if needsProviderKey { return "Paste your \(provider.label) API key." }
+            if !hasSharingConsent { return "Allow sharing with \(sharingRecipient) in Settings." }
             return "Ready — \(provider.label), \(model)."
         }
     }
@@ -240,6 +360,44 @@ final class AppSettings {
 
 enum Keychain {
     private static let service = "com.catchmeup.app"
+    private static let installMarker = "keychainInstallRecorded"
+    private static let probeAccount = "install.probe"
+    /// Settings any earlier build would have written. Finding one means this
+    /// is an update, so the items in the Keychain are still wanted.
+    private static let priorInstallKeys = ["hasOnboarded", "engineKind", "providerID"]
+
+    /// iOS can keep Keychain items after an app is deleted, while UserDefaults
+    /// goes with it. A first launch with no settings is therefore a new install,
+    /// and anything left in the Keychain belongs to a deleted copy of the app.
+    ///
+    /// Settings can also read as empty while the device is locked, so nothing
+    /// is erased or recorded until the Keychain confirms it is unlocked.
+    static func reconcileInstall(defaults: UserDefaults = .standard, deviceUnlocked: Bool? = nil) {
+        guard !defaults.bool(forKey: installMarker),
+              deviceUnlocked ?? isDeviceUnlocked
+        else { return }
+        let isUpdate = priorInstallKeys.contains { defaults.object(forKey: $0) != nil }
+        if !isUpdate { removeAll() }
+        defaults.set(true, forKey: installMarker)
+    }
+
+    static func removeAll() {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: service]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    private static var isDeviceUnlocked: Bool {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: service,
+                                    kSecAttrAccount as String: probeAccount]
+        var add = query
+        add[kSecValueData as String] = Data()
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let status = SecItemAdd(add as CFDictionary, nil)
+        SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecDuplicateItem
+    }
 
     static func set(_ value: String, for key: String) {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,

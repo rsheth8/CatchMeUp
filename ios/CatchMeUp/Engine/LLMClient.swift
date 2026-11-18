@@ -10,6 +10,9 @@ struct LLMClient {
     private static let requestTimeout: TimeInterval = 300
 
     func complete(system: String, user: String, maxTokens: Int = 8000) async throws -> String {
+        // Every request to a provider passes through here, so this one check
+        // covers notes, brain answers, meeting insights, questions and grading.
+        guard config.sharingAllowed else { throw EngineError.sharingNotAllowed }
         do {
             switch config.kind {
             case .anthropic: return try await anthropic(system: system, user: user, maxTokens: maxTokens)

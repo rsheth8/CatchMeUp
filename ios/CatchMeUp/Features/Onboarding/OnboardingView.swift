@@ -18,8 +18,8 @@ struct OnboardingView: View {
              body: "CatchMeUp turns a recording into clean notes — the gist, the decisions, the action items, or the study checklist.",
              tint: .brand),
         Pane(symbol: "lock.iphone",
-             title: "Your audio stays\non this iPhone",
-             body: "Transcription runs on device with Apple Speech. Only the text is used to write the notes — and in Demo or On-device mode, nothing leaves your phone at all.",
+             title: "Transcribed right\non this iPhone",
+             body: "Apple Speech turns your audio into text on this device. Your content leaves it only if you turn on iCloud sync or allow an AI provider you choose.",
              tint: .brandDeep),
         // The pane that says what this app is *for*. Notes are the input; the
         // product is what happens to them afterwards, and a first-time user who
@@ -100,7 +100,7 @@ struct OnboardingView: View {
     private var signInPane: some View {
         AuthWelcomeView(
             headline: "Save your spot",
-            message: "Sign in so your name shows up here on this iPhone. Everything still stays local and syncs through your own iCloud — this is just personalization.",
+            message: "Sign in so your name shows up here on this iPhone. It doesn't create an account with us or change where your notes are kept.",
             skipTitle: "Not now",
             onDone: { withAnimation(.quick) { page += 1 } },
             onSkip: { withAnimation(.quick) { page += 1 } }

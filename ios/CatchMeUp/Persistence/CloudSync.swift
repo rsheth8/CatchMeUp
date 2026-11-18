@@ -28,7 +28,7 @@ enum CloudSync {
 
         var text: String {
             switch self {
-            case .off: return "Off — recaps stay on this iPhone."
+            case .off: return "Off. Recaps are stored only on this iPhone."
             case .unavailable: return "Sign in to iCloud on this device to turn on sync."
             case .syncing: return "Syncing with iCloud…"
             case .synced: return "On — recaps sync with your Mac and other Apple devices."

@@ -30,17 +30,7 @@
 				<string>catchmeup</string>
 			</array>
 		</dict>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.catchmeup.app.google</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>REPLACE_WITH_REVERSED_GOOGLE_CLIENT_ID</string>
-			</array>
-		</dict>
 	</array>
-	<key>GIDClientID</key>
-	<string>REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -52,7 +42,7 @@
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>CatchMeUp adds the follow-ups you choose to your Apple Reminders list.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>CatchMeUp transcribes your recordings on this device to write the notes. Audio stays on your iPhone.</string>
+	<string>CatchMeUp transcribes your recordings on this device so it can write notes from them.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSUserActivityTypes</key>

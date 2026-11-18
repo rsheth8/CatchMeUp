@@ -406,6 +406,7 @@ struct Brain: Codable, Identifiable, Hashable {
 enum EngineError: LocalizedError {
     case badResponse
     case missingKey
+    case sharingNotAllowed
     case onDeviceUnavailable(String)
     case emptyTranscript
     case http(Int, String)
@@ -414,6 +415,7 @@ enum EngineError: LocalizedError {
         switch self {
         case .badResponse: return "The model didn't return notes we could read. Try again."
         case .missingKey: return "Add your API key in Settings, or switch to Demo or On-device."
+        case .sharingNotAllowed: return "Nothing was sent. Allow sharing with this provider in Settings, then try again."
         case .onDeviceUnavailable(let why): return why
         case .emptyTranscript: return "There was no speech in this recording to write notes from."
         case .http(let code, let body):

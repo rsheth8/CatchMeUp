@@ -3,6 +3,33 @@ import AuthenticationServices
 import GoogleSignIn
 import GoogleSignInSwift
 
+/// Whether this build can start Google sign-in.
+///
+/// The SDK raises an uncaught exception, which ends the app, if the client ID's
+/// reversed URL scheme isn't registered. So the button only appears when
+/// `Info.plist` holds a real client ID and its matching scheme.
+enum GoogleSignInConfiguration {
+    private static let clientSuffix = ".apps.googleusercontent.com"
+
+    static var isAvailable: Bool { isUsable(info: Bundle.main.infoDictionary ?? [:]) }
+
+    static func isUsable(info: [String: Any]) -> Bool {
+        guard let clientID = info["GIDClientID"] as? String,
+              clientID.hasSuffix(clientSuffix),
+              !clientID.contains("REPLACE_WITH")
+        else { return false }
+
+        let identifier = clientID.dropLast(clientSuffix.count)
+        guard !identifier.isEmpty else { return false }
+        let required = "com.googleusercontent.apps.\(identifier)".lowercased()
+
+        let urlTypes = info["CFBundleURLTypes"] as? [[String: Any]] ?? []
+        return urlTypes
+            .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+            .contains { $0.lowercased() == required }
+    }
+}
+
 /// Apple and Google's own buttons, wired to `AuthManager`. Used on the last
 /// onboarding page and again in Settings for anyone who skipped it there.
 struct SignInButtons: View {
@@ -23,8 +50,10 @@ struct SignInButtons: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 46)
 
-            GoogleSignInButton(action: signInWithGoogle)
-                .frame(height: 46)
+            if GoogleSignInConfiguration.isAvailable {
+                GoogleSignInButton(action: signInWithGoogle)
+                    .frame(height: 46)
+            }
         }
     }
 

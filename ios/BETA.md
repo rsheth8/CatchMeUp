@@ -19,6 +19,11 @@ Two things are **not**, because they're yours and not the repo's:
 | Team ID | `DEVELOPMENT_TEAM` in `project.yml`, or the command line | Left blank on purpose — see below |
 | Bundle IDs | `com.catchmeup.app`, `.widgets`, and the iCloud container | The app ID needs the iCloud capability. Automatic signing creates `.widgets` itself; the iCloud container is the one thing you make by hand |
 
+Google sign-in is off until it is configured, and its button stays hidden until
+then. To turn it on, add `GIDClientID` to `CatchMeUp/Info.plist` and register the
+reversed client ID under `CFBundleURLTypes`. Doing so changes the App Privacy
+answers below.
+
 The iCloud container `iCloud.com.catchmeup.app` has to be created in the
 developer portal before a signed build will install, or sync silently does
 nothing.
@@ -42,14 +47,26 @@ twenty minutes in TestFlight.
 
 ## 3. What App Store Connect will ask for
 
-- **Privacy policy URL** — required for external testing. The text is in the
-  app under Settings ▸ Privacy; publish the same wording at a URL you control.
-- **Data collection** — answer *no data collected*. There's no analytics SDK,
-  no crash reporter, no account, and no identifier. Transcripts sent to a
-  provider are sent by the user, with the user's own key, to a service the user
-  chose — that isn't collection by this app.
-- **Encryption** — already answered in `Info.plist` (standard HTTPS only).
-- **Sign-in** — there is none; say so, and don't attach a demo account.
+- **Privacy policy and support URLs:** enter
+  `https://rsheth8.github.io/CatchMeUp/privacy/` and `/support/` in App Store
+  Connect. The source is in `site/`, and GitHub Pages serves a copy from the
+  `gh-pages` branch, so an edit to `site/` goes live only after it is copied
+  there. Keep the pages in step with Settings ▸ Privacy.
+- **Data collection:** review this against Apple's definitions before answering.
+  CatchMeUp has no analytics SDK, crash reporter or server. Text goes to an AI
+  provider only after the user allows that provider, using the user's own key.
+  If Google sign-in is enabled, its SDK declares that it collects data including
+  name, email address and phone number, so *no data collected* needs a fresh look.
+- **Encryption:** already answered in `Info.plist` (standard HTTPS only).
+- **Sign-in:** optional. Sign in with Apple only displays a name and email on the
+  device, and the app works fully after tapping "Not now", so no demo account is
+  needed for it.
+- **Review access:** sign-in is optional, so no demo account is needed, and no
+  API key is shared with App Review. In the review notes, point to Settings ▸
+  Explore the showcase account, explain that real notes use Apple Intelligence
+  on supported devices or the user's own key, and link a short screen recording
+  of the API key flow. App Review can still ask for more, so check the showcase
+  tour works before submitting.
 
 ## 4. What to put in the tester notes
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 @main
 struct CatchMeUpApp: App {
@@ -47,6 +48,12 @@ struct CatchMeUpApp: App {
                     .fontDesign(.rounded)
                     .tint(.brand)
                     .task { await houseKeeping() }
+                    .task { await auth.refreshAppleCredential() }
+                    .onReceive(NotificationCenter.default.publisher(
+                        for: ASAuthorizationAppleIDProvider.credentialRevokedNotification
+                    )) { _ in
+                        auth.handleAppleCredentialRevoked()
+                    }
                     .fullScreenCover(isPresented: Bindable(ShowcaseSession.shared).isActive) {
                         ShowcaseView()
                     }
@@ -55,6 +62,11 @@ struct CatchMeUpApp: App {
                             .environment(auth)
                     }
                     .onChange(of: scenePhase) { _, phase in
+                        // Sign-in can be revoked from Apple account settings
+                        // while the app is in the background.
+                        if phase == .active {
+                            Task { await auth.refreshAppleCredential() }
+                        }
                         guard !ShowcaseSession.shared.isActive else { return }
                         // Coming back to the foreground is the common way a parked
                         // job gets picked up — the scheduled task is the fallback

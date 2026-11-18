@@ -25,7 +25,7 @@ enum SpeechPreparation: Equatable {
         switch self {
         case .audio: return "If your recording is in iCloud, it needs to download first."
         case .permission: return "Allow speech recognition when prompted."
-        case .model: return "First use may take a few minutes. Stay online while Apple prepares the language model. Your audio stays on this device."
+        case .model: return "First use may take a few minutes. Stay online while Apple prepares the language model. Your audio isn't uploaded for transcription."
         case .starting: return "Apple Speech turns audio into text. Your recap engine, including Claude, writes the notes afterward."
         case .recovering: return "Apple Speech took longer than expected. Trying once more automatically — your audio is safe."
         }

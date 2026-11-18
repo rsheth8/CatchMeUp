@@ -193,7 +193,9 @@ struct RecordView: View {
             } else if recorder.isPaused {
                 Text("Paused")
             } else if recorder.isRecording {
-                Text("Recording — audio stays on this iPhone")
+                Text(store.syncEnabled
+                     ? "Recording. Audio will sync to your iCloud."
+                     : "Recording. Audio is saved on this iPhone.")
             } else {
                 Text("Tap to start. You can pause any time.")
             }

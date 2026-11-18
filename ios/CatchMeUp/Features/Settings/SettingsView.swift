@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     /// Non-nil while the feedback share sheet is up; holds the text being sent.
     @State private var feedback: String?
+    @State private var reviewingSharing = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -89,7 +90,30 @@ struct SettingsView: View {
                         if settings.providerID != "ollama" {
                             SecureField("API key", text: $settings.apiKey)
                                 .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .disabled(settings.sharingDestination == nil)
                         }
+                    }
+                    Section {
+                        if settings.hasSharingConsent {
+                            LabeledContent {
+                                Button("Turn Off", role: .destructive) { settings.revokeSharingConsent() }
+                            } label: {
+                                Label("Sharing is on", systemImage: "checkmark.shield")
+                            }
+                        } else {
+                            Button {
+                                reviewingSharing = true
+                            } label: {
+                                Label("Review and Allow Sharing", systemImage: "hand.raised")
+                            }
+                            .disabled(settings.sharingDestination == nil)
+                        }
+                    } header: {
+                        Text("Data sharing")
+                    } footer: {
+                        Text(settings.hasSharingConsent
+                             ? "Your transcripts, notes and other text can be sent to \(settings.sharingRecipient). Audio files are not sent."
+                             : "Nothing is sent to \(settings.sharingRecipient) until you allow it.")
                     }
                     if let signup = settings.provider.signup, let url = URL(string: signup) {
                         Section {
@@ -97,7 +121,7 @@ struct SettingsView: View {
                                 Label("Get a \(settings.provider.label) key", systemImage: "key.fill")
                             }
                         } footer: {
-                            Text("The key is stored in the iOS Keychain on this device. Apple Speech transcribes audio on your phone first; this does not require Apple Intelligence. Your API provider then writes the notes from text, not audio.")
+                            Text("Each provider's key is stored separately in this device's Keychain. Apple Speech transcribes audio on your phone first, which does not require Apple Intelligence.")
                         }
                     }
                 }
@@ -250,13 +274,22 @@ struct SettingsView: View {
                     LabeledContent("Brains", value: "\(store.visibleBrains.count)")
                     LabeledContent("Questions", value: "\(study.liveItems.count)")
                     LabeledContent("Version", value: appVersion)
+                    Link(destination: LegalLinks.privacyPolicy) {
+                        Label("Privacy Policy", systemImage: "hand.raised")
+                    }
+                    .accessibilityIdentifier("legal.privacyPolicy")
+                    Link(destination: LegalLinks.support) {
+                        Label("Support", systemImage: "questionmark.circle")
+                    }
+                    .accessibilityIdentifier("legal.support")
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("CatchMeUp turns a meeting or lecture recording into notes, then into questions it brings back on a schedule. Audio is transcribed on your iPhone and never uploaded.")
+                    Text("CatchMeUp turns a meeting or lecture recording into notes, then into questions it brings back on a schedule. Audio is transcribed on your iPhone, and it is stored outside this device only if you turn on iCloud sync.")
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $reviewingSharing) { ProviderConsentView() }
             .sheet(isPresented: Binding(
                 get: { feedback != nil },
                 set: { if !$0 { feedback = nil } }

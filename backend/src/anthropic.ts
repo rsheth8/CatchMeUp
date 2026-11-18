@@ -39,15 +39,15 @@ const ATTEMPTS = 3;
 export async function callModel(
   deps: Deps,
   cfg: Config,
-  input: { system: string; user: string; maxTokens: number },
+  input: { model: string; system: string; user: string; maxTokens: number },
 ): Promise<ModelReply> {
   const body: Record<string, unknown> = {
-    model: cfg.model,
+    model: input.model,
     max_tokens: input.maxTokens,
     system: input.system,
     messages: [{ role: "user", content: input.user }],
   };
-  if (cfg.effort && supportsEffort(cfg.model)) body.output_config = { effort: cfg.effort };
+  if (cfg.effort && supportsEffort(input.model)) body.output_config = { effort: cfg.effort };
   const payload = JSON.stringify(body);
 
   let lastStatus = 0;

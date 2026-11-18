@@ -16,9 +16,34 @@ describe("pricing", () => {
   });
 
   it("has no price for an unknown model, so it cannot be used by accident", () => {
-    expect(rateFor("claude-haiku-5-5")).toBeNull();
-    expect(() => costMicro("claude-haiku-5-5", 1, 1)).toThrow();
+    expect(rateFor("claude-mystery-1")).toBeNull();
+    expect(() => costMicro("claude-mystery-1", 1, 1)).toThrow();
     expect(() => reserveMicro("mystery", 1, 1)).toThrow();
+  });
+
+  describe("Haiku 5.5's prompt-length tiers", () => {
+    it("charges $0.10 in and $0.50 out up to 100,000 prompt tokens", () => {
+      expect(costMicro("claude-haiku-5-5", 100_000, 10_000)).toBe(100_000 * 0.1 + 10_000 * 0.5);
+    });
+
+    it("charges $0.50 in and $2.50 out for the whole request once the prompt passes 100,000 tokens", () => {
+      expect(costMicro("claude-haiku-5-5", 100_001, 10_000)).toBe(Math.ceil(100_001 * 0.5 + 10_000 * 2.5));
+    });
+
+    it("reserves at the tier its upper bound lands in, so a long prompt is never under-reserved", () => {
+      // 99,000 bytes bounds to 100,000 tokens: still the low tier.
+      expect(reserveMicro("claude-haiku-5-5", 99_000, 16_000)).toBe(100_000 * 0.1 + 16_000 * 0.5);
+      // One more byte crosses into the high tier.
+      expect(reserveMicro("claude-haiku-5-5", 99_001, 16_000)).toBe(Math.ceil(100_001 * 0.5 + 16_000 * 2.5));
+      expect(inputOnlyMicro("claude-haiku-5-5", 99_001)).toBe(Math.ceil(100_001 * 0.5));
+    });
+
+    it("never reserves less than the real cost of any prompt that fits in those bytes", () => {
+      for (const bytes of [1_000, 50_000, 99_000, 99_001, 200_000]) {
+        const worstTokens = bytes + 1_000;
+        expect(reserveMicro("claude-haiku-5-5", bytes, 16_000)).toBeGreaterThanOrEqual(costMicro("claude-haiku-5-5", worstTokens, 16_000));
+      }
+    });
   });
 
   it("rounds up so spend is never understated", () => {

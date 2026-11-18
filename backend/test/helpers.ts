@@ -117,7 +117,10 @@ export async function makeApp(overrides: Partial<Env> = {}): Promise<TestApp> {
     GOOGLE_ISSUERS: "https://accounts.google.com,accounts.google.com",
     GOOGLE_JWKS_URL: GOOGLE_JWKS,
     ANTHROPIC_BASE_URL: UPSTREAM,
-    RECAP_MODEL: "claude-sonnet-5-5",
+    // Both plans use Sonnet here so the existing limit tests keep one set of numbers.
+    // The production split (Haiku free, Sonnet Plus) is tested in model-by-plan.
+    RECAP_MODEL_FREE: "claude-sonnet-5-5",
+    RECAP_MODEL_PLUS: "claude-sonnet-5-5",
     RECAP_EFFORT: "medium",
     GLOBAL_DAILY_BUDGET_USD: "25",
     MAX_INPUT_BYTES: "200000",

@@ -65,7 +65,7 @@ describe("a recap request", () => {
   });
 
   it("sends no effort to a model that does not accept it", async () => {
-    const { app, recap } = await setup({ RECAP_MODEL: "claude-haiku-4-5-20251001" });
+    const { app, recap } = await setup({ RECAP_MODEL_FREE: "claude-haiku-4-5-20251001" });
     await recap();
     const call = app.net.upstreamCalls[0]!;
     expect(call.body.output_config).toBeUndefined();
@@ -468,7 +468,9 @@ describe("request checks", () => {
 
 describe("misconfiguration fails closed", () => {
   it.each([
-    ["an unpriced model", { RECAP_MODEL: "claude-haiku-5-5" }],
+    ["an unpriced free model", { RECAP_MODEL_FREE: "claude-mystery-1" }],
+    ["an unpriced Plus model", { RECAP_MODEL_PLUS: "claude-mystery-1" }],
+    ["no free model", { RECAP_MODEL_FREE: "" }],
     ["no API key", { ANTHROPIC_API_KEY: "" }],
     ["a zero global budget", { GLOBAL_DAILY_BUDGET_USD: "0" }],
     ["a garbage limit", { RATE_LIMIT_PER_MINUTE: "lots" }],
@@ -499,5 +501,46 @@ describe("secrets and content stay out of logs and responses", () => {
       expect(everything).not.toContain(secret);
     }
     expect(lines.length).toBeGreaterThan(0);
+  });
+});
+
+describe("model by plan", () => {
+  // The production split, not the shared test default.
+  const split = { RECAP_MODEL_FREE: "claude-haiku-5-5", RECAP_MODEL_PLUS: "claude-sonnet-5-5" };
+
+  it("gives free users Haiku and Plus users Sonnet, and prices each on its own rates", async () => {
+    const { app, session, recap } = await setup(split);
+    await recap();
+    expect(app.net.upstreamCalls[0]!.body.model).toBe("claude-haiku-5-5");
+    // 1,000 in at $0.10/M and 500 out at $0.50/M, rounded up: 0.1 + 0.25 -> 1 micro-dollar each side.
+    const rowFor = async (model: string) => (await ledgerRows()).find((r) => r.model === model);
+    expect(await rowFor("claude-haiku-5-5")).toMatchObject({ status: "settled", cost_micro: 1_000 * 0.1 + 500 * 0.5 });
+
+    await grantPlus(session.userId, START + 30 * 86_400_000);
+    await recap();
+    expect(app.net.upstreamCalls[1]!.body.model).toBe("claude-sonnet-5-5");
+    expect(await rowFor("claude-sonnet-5-5")).toMatchObject({ status: "settled", cost_micro: SONNET_OK_COST });
+  });
+
+  it("switches model the moment a subscription starts or lapses", async () => {
+    const { app, session, recap } = await setup(split);
+    await grantPlus(session.userId, START + 1_000);
+    await recap();
+    app.clock.now = START + 2_000;
+    await recap();
+    expect(app.net.upstreamCalls.map((c) => c.body.model)).toEqual(["claude-sonnet-5-5", "claude-haiku-5-5"]);
+  });
+
+  it("ignores a model named by the client for either plan", async () => {
+    const { app, recap } = await setup(split);
+    await recap({ ...RECAP_BODY, model: "claude-opus-5-5" });
+    expect(app.net.upstreamCalls[0]!.body.model).toBe("claude-haiku-5-5");
+  });
+
+  it("sends Haiku 5.5 an effort setting and thinking headroom, like the other 5-series models", async () => {
+    const { app, recap } = await setup(split);
+    await recap();
+    expect(app.net.upstreamCalls[0]!.body.output_config).toEqual({ effort: "medium" });
+    expect(app.net.upstreamCalls[0]!.body.max_tokens).toBe(16_000);
   });
 });

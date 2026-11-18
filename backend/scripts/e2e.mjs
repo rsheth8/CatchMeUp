@@ -196,12 +196,13 @@ if (!live) {
   check(upstreamSeen.length === 3, "the refused request never reached the model", `${upstreamSeen.length} model calls`);
 
   const seen = upstreamSeen[0];
-  check(seen.body.model === "claude-sonnet-5-5" && seen.body.temperature === undefined && seen.body.output_config?.effort === "medium", "model call uses server-chosen model and effort, no sampling params");
+  check(seen.body.model === "claude-haiku-5-5" && seen.body.temperature === undefined && seen.body.output_config?.effort === "medium", "free plan uses Haiku, server-chosen effort, no sampling params");
   check(seen.headers["x-api-key"] === "sk-e2e-not-a-real-key", "API key is sent to the model provider as a header");
 
   d1(`INSERT INTO subscriptions (user_id, product_id, status, expires_at, updated_at) VALUES ('${signedIn.json.user.id}', 'plus.monthly', 'active', ${Date.now() + 86_400_000}, ${Date.now()})`);
   const plus = await call("POST", "/v1/recap", { token, body: recapBody });
   check(plus.status === 200 && plus.json?.quota?.plan === "plus", "an active subscription lifts the limit", `plan ${plus.json?.quota?.plan}, ${plus.json?.quota?.recapsRemaining} left`);
+  check(upstreamSeen[3]?.body.model === "claude-sonnet-5-5", "an active subscription switches the call to Sonnet", upstreamSeen[3]?.body.model);
 }
 
 if (!live) {

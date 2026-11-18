@@ -15,9 +15,10 @@ GOOGLE_ISSUERS = "https://accounts.google.com,accounts.google.com"
 GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-# The server, not the app, chooses the model. It must have a price in
+# The server, not the app, chooses the model, by plan. Each must have a price in
 # src/pricing.ts, otherwise requests fail closed.
-RECAP_MODEL = "claude-sonnet-5-5"
+RECAP_MODEL_FREE = "claude-haiku-5-5"
+RECAP_MODEL_PLUS = "claude-sonnet-5-5"
 RECAP_EFFORT = "medium"
 
 # Hard ceilings. The per-user quotas live in src/plans.ts.

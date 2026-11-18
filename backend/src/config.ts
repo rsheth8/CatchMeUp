@@ -1,11 +1,13 @@
 import type { Env } from "./env";
 import { ApiError } from "./http";
+import type { PlanId } from "./plans";
 import { rateFor } from "./pricing";
 
 export interface Config {
   apiKey: string;
   baseUrl: string;
-  model: string;
+  /** The model each plan gets. Both are priced, or the service refuses to start. */
+  models: Record<PlanId, string>;
   effort: string | null;
   globalDailyBudgetMicro: number;
   /** Cap on the UTF-8 size of system plus user text, which also bounds the reservation. */
@@ -29,13 +31,15 @@ function positive(name: string, raw: string | undefined): number {
  */
 export function loadConfig(env: Env): Config {
   if (!env.ANTHROPIC_API_KEY) throw new ApiError(500, "misconfigured", "The service is not configured correctly.", { setting: "ANTHROPIC_API_KEY" });
-  if (!env.RECAP_MODEL || !rateFor(env.RECAP_MODEL)) {
-    throw new ApiError(500, "misconfigured", "The service is not configured correctly.", { setting: "RECAP_MODEL" });
+  for (const name of ["RECAP_MODEL_FREE", "RECAP_MODEL_PLUS"] as const) {
+    if (!env[name] || !rateFor(env[name])) {
+      throw new ApiError(500, "misconfigured", "The service is not configured correctly.", { setting: name });
+    }
   }
   return {
     apiKey: env.ANTHROPIC_API_KEY,
     baseUrl: (env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, ""),
-    model: env.RECAP_MODEL,
+    models: { free: env.RECAP_MODEL_FREE, plus: env.RECAP_MODEL_PLUS },
     effort: env.RECAP_EFFORT || null,
     globalDailyBudgetMicro: Math.round(positive("GLOBAL_DAILY_BUDGET_USD", env.GLOBAL_DAILY_BUDGET_USD) * 1_000_000),
     maxInputBytes: positive("MAX_INPUT_BYTES", env.MAX_INPUT_BYTES),

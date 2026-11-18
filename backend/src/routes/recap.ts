@@ -51,14 +51,16 @@ export async function recap(request: Request, ctx: Ctx): Promise<Response> {
     throw new ApiError(400, "bad_request", '"maxTokens" must be a positive integer.');
   }
 
-  const maxTokens = effectiveMaxTokens(cfg.model, requested, cfg.maxOutputTokens);
   const plan = await planFor(ctx.env.DB, user.id, ctx.now);
+  // The plan, not the app, decides the model.
+  const model = cfg.models[plan.id];
+  const maxTokens = effectiveMaxTokens(model, requested, cfg.maxOutputTokens);
   const reservation = {
     id: crypto.randomUUID(),
     userId: user.id,
     task,
-    model: cfg.model,
-    reserveMicro: reserveMicro(cfg.model, inputBytes, maxTokens),
+    model,
+    reserveMicro: reserveMicro(model, inputBytes, maxTokens),
     nowMs: ctx.now,
     plan,
     globalDailyBudgetMicro: cfg.globalDailyBudgetMicro,
@@ -84,16 +86,16 @@ export async function recap(request: Request, ctx: Ctx): Promise<Response> {
   const work = (async (): Promise<ModelReply> => {
     let reply: ModelReply;
     try {
-      reply = await callModel(ctx.deps, cfg, { system, user: userText, maxTokens });
+      reply = await callModel(ctx.deps, cfg, { model, system, user: userText, maxTokens });
     } catch (error) {
-      await recordFailure(ctx, reservation.id, cfg.model, inputBytes, reservation.reserveMicro, error);
+      await recordFailure(ctx, reservation.id, model, inputBytes, reservation.reserveMicro, error);
       throw error;
     }
     await settle(
       ctx.env.DB,
       reservation.id,
       {
-        costMicro: costMicro(cfg.model, reply.inputTokens, reply.outputTokens),
+        costMicro: costMicro(model, reply.inputTokens, reply.outputTokens),
         inputTokens: reply.inputTokens,
         outputTokens: reply.outputTokens,
       },
@@ -113,6 +115,7 @@ export async function recap(request: Request, ctx: Ctx): Promise<Response> {
   log("recap_ok", {
     task,
     plan: plan.id,
+    model,
     inputTokens: reply.inputTokens,
     outputTokens: reply.outputTokens,
     requestId: ctx.requestId,

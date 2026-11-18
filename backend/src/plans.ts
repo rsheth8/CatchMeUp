@@ -11,8 +11,9 @@ export interface Plan {
 /**
  * Free is promised as "3 recaps a month", so the count is what users hit; the
  * dollar budget is a safety net behind it, sized so that one largest-possible
- * request (about $0.56 reserved at 200 KB of text) still fits. Normal use is
- * about $0.04 a recap, far under it. Plus is metered in dollars, because cost
+ * request still fits on either model (about $0.56 reserved on Sonnet, $0.14 on
+ * Haiku 5.5, at 200 KB of text). Normal use is about $0.003 a recap on Haiku
+ * 5.5 and $0.04 on Sonnet, far under it. Plus is metered in dollars, because cost
  * varies about 2x with recording length, and the count is a sanity ceiling.
  *
  * Sizing: Plus at $6.99 nets about $5.94 after Apple's 15% (Small Business

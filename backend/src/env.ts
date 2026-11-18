@@ -16,7 +16,9 @@ export interface Env {
 
   // Model
   ANTHROPIC_BASE_URL: string;
-  RECAP_MODEL: string;
+  /** Model for each plan. Each needs a price in src/pricing.ts. */
+  RECAP_MODEL_FREE: string;
+  RECAP_MODEL_PLUS: string;
   RECAP_EFFORT?: string;
 
   // Hard ceilings

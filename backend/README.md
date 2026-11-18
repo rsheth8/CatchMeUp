@@ -87,7 +87,7 @@ unmetered.
 ```bash
 cd backend
 npm install            # Node 20+
-npm test               # 94 tests in the real Workers runtime, no network
+npm test               # 104 tests in the real Workers runtime, no network
 npm run typecheck
 npm run e2e            # local Worker + local database, model stubbed
 ```
@@ -109,12 +109,20 @@ First deploy:
 6. `npx wrangler deploy`
 7. Add a Cloudflare notification for Worker error rate, and watch the `recap_refused` log events with `reason: service_busy`.
 
-## Choosing the model
+## Choosing the models
 
-`RECAP_MODEL` in `wrangler.toml` sets it for everyone. It must have a price in
-`src/pricing.ts`; prices are the ones the benchmark used, so check them against
-Anthropic's pricing page before launch. Haiku 5.5 is deliberately not in the table
-until its price is verified, so selecting it fails closed.
+The plan picks the model: `RECAP_MODEL_FREE` (Haiku 5.5) and `RECAP_MODEL_PLUS`
+(Sonnet 5.5) in `wrangler.toml`. Each must have a price in `src/pricing.ts`, or the
+service refuses to serve. Prices were checked against Anthropic's pricing page on
+18 Nov 2026. Haiku 5.5 is $0.10 in / $0.50 out per million tokens for prompts up to
+100,000 tokens and $0.50 / $2.50 above that, applied to the whole request; the
+table models the tier, and reservations use the tier their upper bound lands in.
+
+From `ios/Bench` (9 recordings): Haiku 5.5 scored 99% fact coverage and 4.41 of 5
+from the judge at $0.003 a recording; Sonnet 5.5 scored 100% and 4.70 at $0.037.
+That is a small gap, mostly in faithfulness (4.22 vs 4.78). The Haiku 5.5 vs Sonnet
+5.5 pairwise has not been run. Plus's pitch should lean on limits and reliability
+as well as on quality.
 
 ## Decisions to confirm
 

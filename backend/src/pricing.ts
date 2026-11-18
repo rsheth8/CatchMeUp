@@ -11,6 +11,11 @@
 export interface Rate {
   input: number;
   output: number;
+  /**
+   * Some models (Haiku 5.5) charge more for a request whose prompt is over a
+   * threshold, on both input and output, for the whole request.
+   */
+  long?: { aboveInputTokens: number; input: number; output: number };
 }
 
 // Longest prefix wins, so a dated id such as claude-haiku-4-5-20251001 resolves.
@@ -21,6 +26,8 @@ const TABLE: Array<[string, Rate]> = [
   ["claude-sonnet-5", { input: 2, output: 10 }],
   ["claude-sonnet-4-6", { input: 3, output: 15 }],
   ["claude-haiku-4-5", { input: 1, output: 5 }],
+  // Verified on platform.claude.com/docs/en/about-claude/pricing, 18 Nov 2026.
+  ["claude-haiku-5-5", { input: 0.1, output: 0.5, long: { aboveInputTokens: 100_000, input: 0.5, output: 2.5 } }],
 ].sort((a, b) => (b[0] as string).length - (a[0] as string).length) as Array<[string, Rate]>;
 
 export function rateFor(model: string): Rate | null {
@@ -29,9 +36,15 @@ export function rateFor(model: string): Rate | null {
 
 /** Actual cost of a call, rounded up so spend is never understated. */
 export function costMicro(model: string, inputTokens: number, outputTokens: number): number {
+  const rate = tierFor(model, inputTokens);
+  return Math.ceil(inputTokens * rate.input + outputTokens * rate.output);
+}
+
+/** The per-token rates that apply to a request with this many prompt tokens. */
+function tierFor(model: string, inputTokens: number): { input: number; output: number } {
   const rate = rateFor(model);
   if (!rate) throw new Error(`No price for model ${model}`);
-  return Math.ceil(inputTokens * rate.input + outputTokens * rate.output);
+  return rate.long && inputTokens > rate.long.aboveInputTokens ? rate.long : rate;
 }
 
 /** Models that accept output_config.effort. Haiku 4.5 does not. */
@@ -71,14 +84,14 @@ export function inputTokensUpperBound(inputBytes: number): number {
  * known: the input upper bound, and output assumed to use all of max_tokens.
  */
 export function reserveMicro(model: string, inputBytes: number, maxTokens: number): number {
-  const rate = rateFor(model);
-  if (!rate) throw new Error(`No price for model ${model}`);
-  return Math.ceil(inputTokensUpperBound(inputBytes) * rate.input + maxTokens * rate.output);
+  const inputTokens = inputTokensUpperBound(inputBytes);
+  // Reserved at the tier the upper bound lands in, which is never cheaper than the real one.
+  const rate = tierFor(model, inputTokens);
+  return Math.ceil(inputTokens * rate.input + maxTokens * rate.output);
 }
 
 /** The input side alone, charged when a call fails without a usage report and may still have been read. */
 export function inputOnlyMicro(model: string, inputBytes: number): number {
-  const rate = rateFor(model);
-  if (!rate) throw new Error(`No price for model ${model}`);
-  return Math.ceil(inputTokensUpperBound(inputBytes) * rate.input);
+  const inputTokens = inputTokensUpperBound(inputBytes);
+  return Math.ceil(inputTokens * tierFor(model, inputTokens).input);
 }

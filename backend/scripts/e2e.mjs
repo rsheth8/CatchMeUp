@@ -181,7 +181,7 @@ const recapBody = {
 const remaining = [];
 for (let i = 1; i <= 3; i++) {
   const t0 = Date.now();
-  const r = await call("POST", "/v1/recap", { token, body: recapBody });
+  const r = await call("POST", "/v1/recap", { token, body: { ...recapBody, jobId: `e2e-recording-${i}` } });
   remaining.push(r.json?.quota?.recapsRemaining);
   let parses = true;
   try { JSON.parse(r.json.text.replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { parses = false; }
@@ -191,7 +191,7 @@ for (let i = 1; i <= 3; i++) {
 
 if (!live) {
   check(JSON.stringify(remaining) === "[2,1,0]", "quota counts down 2, 1, 0", JSON.stringify(remaining));
-  const fourth = await call("POST", "/v1/recap", { token, body: recapBody });
+  const fourth = await call("POST", "/v1/recap", { token, body: { ...recapBody, jobId: "e2e-recording-4" } });
   check(fourth.status === 402 && fourth.json?.error?.code === "quota_exceeded", "4th recap refused with 402 quota_exceeded", `status ${fourth.status}`);
   check(upstreamSeen.length === 3, "the refused request never reached the model", `${upstreamSeen.length} model calls`);
 
@@ -200,7 +200,7 @@ if (!live) {
   check(seen.headers["x-api-key"] === "sk-e2e-not-a-real-key", "API key is sent to the model provider as a header");
 
   d1(`INSERT INTO subscriptions (user_id, product_id, status, expires_at, updated_at) VALUES ('${signedIn.json.user.id}', 'plus.monthly', 'active', ${Date.now() + 86_400_000}, ${Date.now()})`);
-  const plus = await call("POST", "/v1/recap", { token, body: recapBody });
+  const plus = await call("POST", "/v1/recap", { token, body: { ...recapBody, jobId: "e2e-recording-4" } });
   check(plus.status === 200 && plus.json?.quota?.plan === "plus", "an active subscription lifts the limit", `plan ${plus.json?.quota?.plan}, ${plus.json?.quota?.recapsRemaining} left`);
   check(upstreamSeen[3]?.body.model === "claude-sonnet-5-5", "an active subscription switches the call to Sonnet", upstreamSeen[3]?.body.model);
 }
@@ -211,7 +211,7 @@ if (!live) {
   const slow = fetch(`${base}/v1/recap`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ ...recapBody, user: "SLOW " + transcript }),
+    body: JSON.stringify({ ...recapBody, jobId: "e2e-recording-5", user: "SLOW " + transcript }),
     signal: hangUp.signal,
   }).catch(() => null);
   await new Promise((r) => setTimeout(r, 700));

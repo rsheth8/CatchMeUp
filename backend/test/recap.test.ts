@@ -20,7 +20,9 @@ afterEach(() => vi.restoreAllMocks());
 async function setup(overrides = {}) {
   const app = await makeApp(overrides);
   const session = await app.signInApple();
-  const recap = (body: unknown = RECAP_BODY, token = session.accessToken) => app.call("POST", "/v1/recap", { body, token });
+  // Each call is its own recording unless a test names a jobId, so one call is one recap.
+  const recap = (body: Record<string, unknown> = RECAP_BODY, token = session.accessToken) =>
+    app.call("POST", "/v1/recap", { body: { jobId: crypto.randomUUID(), ...body }, token });
   return { app, session, recap };
 }
 
@@ -542,5 +544,91 @@ describe("model by plan", () => {
     await recap();
     expect(app.net.upstreamCalls[0]!.body.output_config).toEqual({ effort: "medium" });
     expect(app.net.upstreamCalls[0]!.body.max_tokens).toBe(16_000);
+  });
+});
+
+describe("a recap is one recording, not one model call", () => {
+  it("counts every window and follow-up call of one recording as a single recap", async () => {
+    const { app, session, recap } = await setup();
+    const jobId = "recording-aaaa-1111";
+    for (const task of ["recap", "recap", "recap", "meeting", "recap"]) {
+      expect((await recap({ ...RECAP_BODY, task, jobId })).status).toBe(200);
+    }
+    const me = await app.call("GET", "/v1/me", { token: session.accessToken });
+    expect(me.json.quota.recapsRemaining).toBe(2); // five calls, one recording
+    expect(app.net.upstreamCalls).toHaveLength(5);
+  });
+
+  it("lets a recording that already counted finish after the monthly limit is reached", async () => {
+    const { recap } = await setup();
+    await recap({ ...RECAP_BODY, jobId: "recording-first-1" });
+    await recap();
+    await recap();
+    expect((await recap()).status).toBe(402); // a fourth recording
+    expect((await recap({ ...RECAP_BODY, jobId: "recording-first-1" })).status).toBe(200); // a retry of the first
+  });
+
+  it("does not let a recording that has not been counted slip in once the limit is reached", async () => {
+    const { app, recap } = await setup();
+    for (let i = 0; i < 3; i++) await recap();
+    const res = await recap({ ...RECAP_BODY, jobId: "brand-new-recording" });
+    expect(res.status).toBe(402);
+    expect(res.json.error.code).toBe("quota_exceeded");
+    expect(app.net.upstreamCalls).toHaveLength(3);
+  });
+
+  it("does not count a recording whose calls all failed", async () => {
+    const { app, recap, session } = await setup();
+    app.net.upstream = [{ status: 500, body: {} }];
+    await recap({ ...RECAP_BODY, jobId: "flaky-recording-1" });
+    app.net.upstream = [{ status: 200, body: okBody() }];
+    const me = await app.call("GET", "/v1/me", { token: session.accessToken });
+    expect(me.json.quota.recapsRemaining).toBe(3);
+    for (let i = 0; i < 3; i++) expect((await recap()).status).toBe(200);
+  });
+
+  it("caps the calls one recording can make in a month, so a reused id is not unlimited", async () => {
+    const { app, recap, session } = await setup();
+    await grantPlus(session.userId, START + 30 * 86_400_000);
+    const jobId = "one-recording-forever";
+    const statuses: number[] = [];
+    for (let i = 0; i < 42; i++) {
+      app.clock.now += 7_000; // stay under the per-minute rate limit
+      statuses.push((await recap({ ...RECAP_BODY, jobId })).status);
+      if (i === 8) await db().prepare("UPDATE ledger SET created_at = created_at - 600000").run();
+    }
+    expect(statuses.filter((s) => s === 200)).toHaveLength(40);
+    expect(statuses.slice(40)).toEqual([429, 429]);
+  });
+
+  it("does not use up a recap on questions, answers or grading, only budget", async () => {
+    const { app, recap, session } = await setup();
+    for (const task of ["answer", "questions", "materials", "other", "answer"]) {
+      expect((await recap({ ...RECAP_BODY, task })).status).toBe(200);
+    }
+    const me = await app.call("GET", "/v1/me", { token: session.accessToken });
+    expect(me.json.quota.recapsRemaining).toBe(3);
+    expect((await ledgerRows()).every((r) => r.job_id === null)).toBe(true);
+  });
+
+  it.each([
+    ["no jobId on a recap", { jobId: undefined }],
+    ["no jobId on meeting insights", { task: "meeting", jobId: undefined }],
+    ["a jobId that is too short", { jobId: "abc" }],
+    ["a jobId with odd characters", { jobId: "has spaces and ; quotes" }],
+  ])("rejects %s with 400", async (_name, change) => {
+    const { app, recap } = await setup();
+    const res = await recap({ ...RECAP_BODY, ...change });
+    expect(res.status).toBe(400);
+    expect(app.net.upstreamCalls).toHaveLength(0);
+  });
+
+  it("keeps the monthly limit per account, not per recording id", async () => {
+    const { app, recap } = await setup();
+    const other = await app.signInApple("someone-else");
+    await recap({ ...RECAP_BODY, jobId: "shared-id-12345" });
+    // The same id on another account is a separate recording.
+    expect((await recap({ ...RECAP_BODY, jobId: "shared-id-12345" }, other.accessToken)).status).toBe(200);
+    expect((await app.call("GET", "/v1/me", { token: other.accessToken })).json.quota.recapsRemaining).toBe(2);
   });
 });

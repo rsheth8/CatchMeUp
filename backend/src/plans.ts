@@ -2,7 +2,7 @@ export type PlanId = "free" | "plus";
 
 export interface Plan {
   id: PlanId;
-  /** Hard cap on successful model calls per UTC calendar month. */
+  /** Hard cap on distinct recordings recapped per UTC calendar month. */
   recapsPerMonth: number;
   /** Hard cap on API spend per month, in micro-dollars. This is the real limit. */
   budgetMicro: number;
@@ -20,6 +20,13 @@ export interface Plan {
  * Program). A $3.70 budget leaves roughly $2.20 of margin at the cap, and a
  * typical student will be well under it.
  */
+/**
+ * Calls one recording may make in a month. A long lecture is a handful of
+ * windows plus retries and a meeting-insights call; this is far above that, and
+ * exists so a reused job id cannot become unlimited recaps.
+ */
+export const MAX_CALLS_PER_JOB = 40;
+
 export const PLANS: Record<PlanId, Plan> = {
   free: { id: "free", recapsPerMonth: 3, budgetMicro: 600_000 },
   plus: { id: "plus", recapsPerMonth: 200, budgetMicro: 3_700_000 },

@@ -19,7 +19,7 @@ export function dayOf(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 10);
 }
 
-export type Rejection = "rate_limited" | "quota_exceeded" | "request_in_flight" | "service_busy";
+export type Rejection = "rate_limited" | "quota_exceeded" | "job_limit" | "request_in_flight" | "service_busy";
 
 export interface ReserveInput {
   id: string;
@@ -31,6 +31,12 @@ export interface ReserveInput {
   plan: Plan;
   globalDailyBudgetMicro: number;
   rateLimitPerMinute: number;
+  /**
+   * The recording this call belongs to, for the calls that count as a recap.
+   * Null for calls that only use budget (questions, answers, grading).
+   */
+  jobId: string | null;
+  maxCallsPerJob: number;
 }
 
 // What a row costs against a budget: its real cost once finished (failed calls
@@ -40,9 +46,10 @@ const SPEND = `COALESCE(SUM(CASE
   WHEN status IN ('settled', 'failed') THEN cost_micro
   WHEN status = 'pending' THEN reserved_micro
   ELSE 0 END), 0)`;
-const RECAPS = `COUNT(CASE
-  WHEN status = 'settled' THEN 1
-  WHEN status = 'pending' AND created_at > ?9 THEN 1 END)`;
+// Distinct recordings, so every window and follow-up call of one recording is one recap.
+const RECAP_JOBS = `COUNT(DISTINCT CASE
+  WHEN status = 'settled' THEN job_id
+  WHEN status = 'pending' AND created_at > ?9 THEN job_id END)`;
 
 /**
  * Checks every limit and takes the reservation in a single statement, so two
@@ -52,15 +59,21 @@ const RECAPS = `COUNT(CASE
  *   ?1 id  ?2 user  ?3 period  ?4 day  ?5 task  ?6 model  ?7 reserve  ?8 now
  *   ?9 pending cutoff  ?10 user budget  ?11 max recaps  ?12 global budget
  *   ?13 rate window start  ?14 max requests in the window
+ *   ?15 job id or null  ?16 max calls per job
  */
 export async function reserve(db: D1Database, input: ReserveInput): Promise<boolean> {
   const { nowMs } = input;
   const result = await db
     .prepare(
-      `INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at)
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8
+      `INSERT INTO ledger (id, user_id, period, day, task, model, status, reserved_micro, created_at, job_id)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?15
        WHERE (SELECT ${SPEND} FROM ledger WHERE user_id = ?2 AND period = ?3) + ?7 <= ?10
-         AND (SELECT ${RECAPS} FROM ledger WHERE user_id = ?2 AND period = ?3) < ?11
+         AND (?15 IS NULL
+              OR EXISTS (SELECT 1 FROM ledger WHERE user_id = ?2 AND period = ?3 AND job_id = ?15
+                         AND (status = 'settled' OR (status = 'pending' AND created_at > ?9)))
+              OR (SELECT ${RECAP_JOBS} FROM ledger WHERE user_id = ?2 AND period = ?3) < ?11)
+         AND (?15 IS NULL
+              OR (SELECT COUNT(*) FROM ledger WHERE user_id = ?2 AND period = ?3 AND job_id = ?15) < ?16)
          AND (SELECT ${SPEND} FROM ledger WHERE day = ?4) + ?7 <= ?12
          AND (SELECT COUNT(*) FROM ledger WHERE user_id = ?2 AND created_at > ?13) < ?14`,
     )
@@ -79,6 +92,8 @@ export async function reserve(db: D1Database, input: ReserveInput): Promise<bool
       input.globalDailyBudgetMicro,
       nowMs - 60_000,
       input.rateLimitPerMinute,
+      input.jobId,
+      input.maxCallsPerJob,
     )
     .run();
   return (result.meta.changes ?? 0) === 1;
@@ -106,15 +121,34 @@ export async function diagnose(db: D1Database, input: ReserveInput): Promise<Rej
            WHEN status = 'pending' AND created_at <= ?3 THEN reserved_micro
            ELSE 0 END), 0) AS spent,
          COALESCE(SUM(CASE WHEN status = 'pending' AND created_at > ?3 THEN reserved_micro ELSE 0 END), 0) AS pending,
-         COUNT(CASE WHEN status = 'settled' THEN 1 END) AS settledCount
+         COUNT(DISTINCT CASE WHEN status = 'settled' THEN job_id END) AS doneJobs,
+         COUNT(DISTINCT CASE
+           WHEN status = 'settled' THEN job_id
+           WHEN status = 'pending' AND created_at > ?3 THEN job_id END) AS liveJobs
        FROM ledger WHERE user_id = ?1 AND period = ?2`,
     )
     .bind(input.userId, period, cutoff)
-    .first<{ spent: number; pending: number; settledCount: number }>();
+    .first<{ spent: number; pending: number; doneJobs: number; liveJobs: number }>();
   const spent = user?.spent ?? 0;
-  if ((user?.settledCount ?? 0) >= input.plan.recapsPerMonth || spent + input.reserveMicro > input.plan.budgetMicro) {
-    return "quota_exceeded";
+
+  if (input.jobId) {
+    const job = await db
+      .prepare(
+        `SELECT COUNT(*) AS calls,
+                COUNT(CASE WHEN status = 'settled' OR (status = 'pending' AND created_at > ?4) THEN 1 END) AS live
+         FROM ledger WHERE user_id = ?1 AND period = ?2 AND job_id = ?3`,
+      )
+      .bind(input.userId, period, input.jobId, cutoff)
+      .first<{ calls: number; live: number }>();
+    if ((job?.calls ?? 0) >= input.maxCallsPerJob) return "job_limit";
+    // A recording already counted as a recap can keep going; only a new one is checked against the count.
+    if ((job?.live ?? 0) === 0) {
+      // Finished recaps use the month up for good. Ones still running might fail, so wait for them.
+      if ((user?.doneJobs ?? 0) >= input.plan.recapsPerMonth) return "quota_exceeded";
+      if ((user?.liveJobs ?? 0) >= input.plan.recapsPerMonth) return "request_in_flight";
+    }
   }
+  if (spent + input.reserveMicro > input.plan.budgetMicro) return "quota_exceeded";
   if (spent + (user?.pending ?? 0) + input.reserveMicro > input.plan.budgetMicro) return "request_in_flight";
 
   const global = await db
@@ -175,7 +209,7 @@ export async function usageFor(db: D1Database, userId: string, nowMs: number): P
   const row = await db
     .prepare(
       `SELECT
-         COUNT(CASE WHEN status = 'settled' THEN 1 END) AS recaps,
+         COUNT(DISTINCT CASE WHEN status = 'settled' THEN job_id END) AS recaps,
          COALESCE(SUM(CASE
            WHEN status IN ('settled','failed') THEN cost_micro
            WHEN status = 'pending' THEN reserved_micro

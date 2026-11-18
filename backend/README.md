@@ -21,7 +21,7 @@ table is ready for them), App Attest, and the iOS client. See "What is left".
 | `POST /v1/auth/logout` | `{refreshToken}` revokes it. |
 | `GET /v1/me` | `{user, quota: {plan, recapsRemaining, resetsAt}}`. |
 | `DELETE /v1/me` | Deletes the account (App Store requirement). Reports if a subscription is still running. |
-| `POST /v1/recap` | `{task, system, user, maxTokens?}` returns `{text, quota}`. Bearer token required. |
+| `POST /v1/recap` | `{task, jobId, system, user, maxTokens?}` returns `{text, quota}`. Bearer token required. `jobId` (the recording id) is required for `recap` and `meeting`. |
 
 Errors are `{error: {code, message, ...}}`. The ones the app should handle:
 
@@ -66,6 +66,16 @@ provider is contacted:
 6. Request bodies are read as a stream and cut off at a byte cap, so an oversized
    upload is refused before it is buffered.
 
+**A recap is one recording, not one call.** The app sends a long recording as
+several windows and makes a follow-up call for meeting insights. Calls with task
+`recap` or `meeting` carry a `jobId`, and the monthly recap count is the number of
+distinct job ids with a finished call, so all of one recording's calls are one
+recap, and a retry of a recording that already counted is free. A job id can make
+at most 40 calls a month (`MAX_CALLS_PER_JOB`), so a reused id is not unlimited.
+Other tasks (`answer`, `questions`, `materials`, `other`) carry no job id: they
+use dollars from the budget but not a recap, so free users can keep asking
+questions about notes they already have until the safety-net budget runs out.
+
 Plans live in `src/plans.ts`:
 
 | | Recaps / month | Budget / month |
@@ -87,7 +97,7 @@ unmetered.
 ```bash
 cd backend
 npm install            # Node 20+
-npm test               # 104 tests in the real Workers runtime, no network
+npm test               # 115 tests in the real Workers runtime, no network
 npm run typecheck
 npm run e2e            # local Worker + local database, model stubbed
 ```
